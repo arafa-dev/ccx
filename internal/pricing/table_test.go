@@ -219,3 +219,44 @@ func TestLastUpdatedReflectsLatestEffectiveFrom(t *testing.T) {
 		t.Errorf("LastUpdated = %v, want %v", got, want)
 	}
 }
+
+const userOverrideAddYAML = `
+models:
+  - model: claude-foo
+    effective_from: 2026-02-01
+    input_per_mtok: 2.00
+    output_per_mtok: 10.00
+    cache_read_per_mtok: 0.20
+    cache_create_per_mtok: 2.50
+`
+
+func TestUserOverrideAddsNewModel(t *testing.T) {
+	tbl, err := pricing.NewTableFromBytes(
+		[]byte(twoModelYAML),
+		[]byte(userOverrideAddYAML),
+	)
+	if err != nil {
+		t.Fatalf("NewTableFromBytes: %v", err)
+	}
+
+	ts := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	usage := contracts.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+
+	got, err := tbl.Cost("claude-foo", ts, usage)
+	if err != nil {
+		t.Fatalf("Cost: %v", err)
+	}
+	const want = 12.00 // 2.00 + 10.00
+	if got != want {
+		t.Errorf("Cost for added model = %.6f, want %.6f", got, want)
+	}
+
+	// The base models must still be present.
+	gotOpus, err := tbl.Cost("claude-opus-4-7", ts, contracts.Usage{InputTokens: 1_000_000})
+	if err != nil {
+		t.Fatalf("Cost: %v", err)
+	}
+	if gotOpus != 15.00 {
+		t.Errorf("base opus still queryable = %.6f, want 15.00", gotOpus)
+	}
+}
