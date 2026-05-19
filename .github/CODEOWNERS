@@ -1,0 +1,7 @@
+* @arafa-dev
+
+# Contracts changes require explicit owner approval
+/internal/contracts/    @arafa-dev
+/api/openapi.yaml       @arafa-dev
+/internal/storage/schema.sql @arafa-dev
+/docs/conventions.md    @arafa-dev
