@@ -260,3 +260,42 @@ func TestUserOverrideAddsNewModel(t *testing.T) {
 		t.Errorf("base opus still queryable = %.6f, want 15.00", gotOpus)
 	}
 }
+
+const userOverrideReplaceOpusYAML = `
+models:
+  - model: claude-opus-4-7
+    effective_from: 2026-01-15
+    input_per_mtok: 9.99
+    output_per_mtok: 49.99
+    cache_read_per_mtok: 0.99
+    cache_create_per_mtok: 12.49
+`
+
+func TestUserOverrideReplacesExistingModel(t *testing.T) {
+	tbl, err := pricing.NewTableFromBytes(
+		[]byte(twoModelYAML),
+		[]byte(userOverrideReplaceOpusYAML),
+	)
+	if err != nil {
+		t.Fatalf("NewTableFromBytes: %v", err)
+	}
+
+	ts := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	got, err := tbl.Cost("claude-opus-4-7", ts, contracts.Usage{InputTokens: 1_000_000})
+	if err != nil {
+		t.Fatalf("Cost: %v", err)
+	}
+	const want = 9.99
+	if got != want {
+		t.Errorf("Cost after override = %.6f, want %.6f (override should win)", got, want)
+	}
+
+	// Sibling model untouched by the override must still use base rates.
+	gotSonnet, err := tbl.Cost("claude-sonnet-4-6", ts, contracts.Usage{InputTokens: 1_000_000})
+	if err != nil {
+		t.Fatalf("Cost: %v", err)
+	}
+	if gotSonnet != 3.00 {
+		t.Errorf("untouched sonnet = %.6f, want 3.00", gotSonnet)
+	}
+}
