@@ -89,3 +89,35 @@ func TestEventJSONRoundtrip(t *testing.T) {
 		t.Errorf("roundtrip mismatch:\n got  %+v\n want %+v", out, in)
 	}
 }
+
+func TestTimeRangeContains(t *testing.T) {
+	start := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 5, 31, 23, 59, 59, 0, time.UTC)
+	tr := contracts.TimeRange{Start: start, End: end}
+
+	tests := []struct {
+		name string
+		t    time.Time
+		want bool
+	}{
+		{"before", time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC), false},
+		{"at start", start, true},
+		{"middle", time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC), true},
+		{"at end", end, true},
+		{"after", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tr.Contains(tc.t); got != tc.want {
+				t.Errorf("Contains(%v) = %v want %v", tc.t, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUsageQueryDefaults(t *testing.T) {
+	q := contracts.UsageQuery{}
+	if q.Profile != "" {
+		t.Errorf("default Profile should be empty (means all), got %q", q.Profile)
+	}
+}

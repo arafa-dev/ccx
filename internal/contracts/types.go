@@ -55,3 +55,35 @@ type Event struct {
 	Model     string    `json:"model,omitempty"`
 	Usage     *Usage    `json:"usage,omitempty"`
 }
+
+// TimeRange is a closed interval [Start, End] used for usage queries.
+type TimeRange struct {
+	Start time.Time
+	End   time.Time
+}
+
+// Contains reports whether t falls within the closed interval [Start, End].
+func (r TimeRange) Contains(t time.Time) bool {
+	return !t.Before(r.Start) && !t.After(r.End)
+}
+
+// UsageQuery filters and groups events for the Store.QueryUsage method.
+// An empty Profile means "all profiles." An empty Project means "all projects."
+type UsageQuery struct {
+	Profile string
+	Project string
+	Range   TimeRange
+}
+
+// UsageRow is one aggregated row returned by Store.QueryUsage. Aggregation
+// granularity (per-profile, per-day, per-project) is determined by the
+// concrete Store implementation.
+type UsageRow struct {
+	Profile      string
+	Project      string
+	Model        string
+	Day          time.Time // truncated to start of day in UTC
+	Usage        Usage
+	SessionCount int
+	EstimatedUSD float64 // populated by the caller after pricing lookup
+}
