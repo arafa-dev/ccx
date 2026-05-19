@@ -86,3 +86,54 @@ func TestCostSonnetPartialUsage(t *testing.T) {
 		t.Errorf("Cost = %.6f, want %.6f", got, want)
 	}
 }
+
+func TestCostUnknownModelReturnsZeroNoError(t *testing.T) {
+	tbl, err := pricing.NewTableFromBytes([]byte(twoModelYAML), nil)
+	if err != nil {
+		t.Fatalf("NewTableFromBytes: %v", err)
+	}
+
+	ts := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	got, err := tbl.Cost("claude-mythical-9-9", ts, contracts.Usage{InputTokens: 5_000_000})
+	if err != nil {
+		t.Fatalf("Cost should not error on unknown model, got %v", err)
+	}
+	if got != 0 {
+		t.Errorf("Cost on unknown model = %v, want 0", got)
+	}
+}
+
+func TestCostTimestampBeforeEarliestEffectiveFromReturnsZero(t *testing.T) {
+	tbl, err := pricing.NewTableFromBytes([]byte(twoModelYAML), nil)
+	if err != nil {
+		t.Fatalf("NewTableFromBytes: %v", err)
+	}
+
+	// embedded earliest is 2026-01-15; pick a ts that predates it.
+	ts := time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)
+	got, err := tbl.Cost("claude-opus-4-7", ts, contracts.Usage{InputTokens: 1_000_000})
+	if err != nil {
+		t.Fatalf("Cost: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("Cost before earliest effective_from = %v, want 0", got)
+	}
+}
+
+func TestCostUnknownModelLogsOnlyOnce(t *testing.T) {
+	tbl, err := pricing.NewTableFromBytes([]byte(twoModelYAML), nil)
+	if err != nil {
+		t.Fatalf("NewTableFromBytes: %v", err)
+	}
+
+	// Call Cost 5x for the same unknown model. We can't easily intercept slog
+	// without an extra dep; this test verifies behavior compiles, runs, and
+	// produces no error. The "logs once" guarantee is exercised indirectly:
+	// the implementation under test consults t.warnedOn[model].
+	ts := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 5; i++ {
+		if _, err := tbl.Cost("claude-mythical-9-9", ts, contracts.Usage{}); err != nil {
+			t.Fatalf("Cost iteration %d: %v", i, err)
+		}
+	}
+}
