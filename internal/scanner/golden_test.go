@@ -134,3 +134,64 @@ func usageDeref(u *contracts.Usage) contracts.Usage {
 	}
 	return *u
 }
+
+func TestScannerIncrementalScanReturnsNothingNewOnSecondPass(t *testing.T) {
+	profile := stageProfile(t, map[string]string{
+		"sample-session.jsonl": filepath.Join("home%2Fu%2Fproj", "sess-001.jsonl"),
+	})
+
+	cs := scanner.NewMemoryCursorStore()
+	s := scanner.NewScanner(cs)
+
+	events1, errs1 := s.Scan(context.Background(), profile)
+	first := 0
+	for range events1 {
+		first++
+	}
+	for err := range errs1 {
+		t.Fatalf("first pass error: %v", err)
+	}
+	if first != 5 {
+		t.Fatalf("first pass got %d events, want 5", first)
+	}
+
+	events2, errs2 := s.Scan(context.Background(), profile)
+	second := 0
+	for ev := range events2 {
+		second++
+		t.Errorf("unexpected event on second pass: %+v", ev)
+	}
+	for err := range errs2 {
+		t.Fatalf("second pass error: %v", err)
+	}
+	if second != 0 {
+		t.Fatalf("second pass got %d events, want 0", second)
+	}
+}
+
+func TestScannerReScansWhenInodeChanges(t *testing.T) {
+	profile := stageProfile(t, map[string]string{
+		"sample-session.jsonl": filepath.Join("home%2Fu%2Fproj", "sess-001.jsonl"),
+	})
+
+	cs := scanner.NewMemoryCursorStore()
+	// Pre-poison the cursor with a non-zero inode that won't match the real file.
+	jsonlPath := filepath.Join(profile.ConfigDir, "projects", "home%2Fu%2Fproj", "sess-001.jsonl")
+	if err := cs.Set(context.Background(), profile.Name, jsonlPath, scanner.Cursor{Offset: 999999, Inode: 1}); err != nil {
+		t.Fatalf("seed cursor: %v", err)
+	}
+
+	s := scanner.NewScanner(cs)
+	events, errs := s.Scan(context.Background(), profile)
+
+	count := 0
+	for range events {
+		count++
+	}
+	for err := range errs {
+		t.Fatalf("scan error: %v", err)
+	}
+	if count != 5 {
+		t.Errorf("inode-change rescan got %d events, want 5", count)
+	}
+}
