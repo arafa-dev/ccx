@@ -93,10 +93,15 @@ type UsageRow struct {
 type Shell int
 
 const (
+	// ShellUnknown represents an unrecognized shell.
 	ShellUnknown Shell = iota
+	// ShellZsh represents zsh.
 	ShellZsh
+	// ShellBash represents bash.
 	ShellBash
+	// ShellFish represents fish.
 	ShellFish
+	// ShellPowerShell represents PowerShell.
 	ShellPowerShell
 )
 

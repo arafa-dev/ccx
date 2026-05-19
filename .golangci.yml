@@ -47,11 +47,6 @@ linters:
           - gocritic
           - revive
         path: _test\.go
-      # Existing bare contract sentinel; keep exported-comment checks everywhere else.
-      - linters:
-          - revive
-        path: internal/contracts/types.go
-        text: "exported const ShellUnknown should have comment"
     paths:
       - third_party$
       - builtin$
