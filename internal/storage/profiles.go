@@ -69,3 +69,59 @@ WHERE name = ?
 	p.LastUsedAt = time.Unix(0, usedNs).UTC()
 	return p, nil
 }
+
+// ListProfiles returns every profile, sorted ascending by name.
+func (s *Store) ListProfiles(ctx context.Context) ([]contracts.Profile, error) {
+	const q = `
+SELECT name, config_dir, label, color, created_at, last_used_at
+FROM profiles
+ORDER BY name ASC
+`
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("listing profiles: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []contracts.Profile
+	for rows.Next() {
+		var (
+			p                 contracts.Profile
+			label, color      sql.NullString
+			createdNs, usedNs int64
+		)
+		if err := rows.Scan(&p.Name, &p.ConfigDir, &label, &color, &createdNs, &usedNs); err != nil {
+			return nil, fmt.Errorf("scanning profile row: %w", err)
+		}
+		p.Label = label.String
+		p.Color = color.String
+		p.CreatedAt = time.Unix(0, createdNs).UTC()
+		p.LastUsedAt = time.Unix(0, usedNs).UTC()
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating profile rows: %w", err)
+	}
+	return out, nil
+}
+
+// DeleteProfile removes the named profile. The FOREIGN KEY ... ON DELETE
+// CASCADE on events and scan_cursors removes the associated rows automatically.
+// Returns contracts.ErrProfileNotFound (wrapped) if no row matched.
+func (s *Store) DeleteProfile(ctx context.Context, name string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	res, err := s.db.ExecContext(ctx, `DELETE FROM profiles WHERE name = ?`, name)
+	if err != nil {
+		return fmt.Errorf("deleting profile %q: %w", name, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected for delete %q: %w", name, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("deleting profile %q: %w", name, contracts.ErrProfileNotFound)
+	}
+	return nil
+}

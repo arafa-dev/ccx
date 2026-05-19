@@ -94,3 +94,78 @@ func TestGetProfileNotFound(t *testing.T) {
 		t.Errorf("GetProfile(nope) err = %v, want ErrProfileNotFound", err)
 	}
 }
+
+func TestListProfilesEmptyReturnsEmptySlice(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	got, err := s.ListProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListProfiles: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ListProfiles on empty store: got %d profiles, want 0", len(got))
+	}
+}
+
+func TestListProfilesSortedByName(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	t0 := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	for _, name := range []string{"charlie", "alpha", "bravo"} {
+		p := contracts.Profile{
+			Name: name, ConfigDir: "/p/" + name,
+			CreatedAt: t0, LastUsedAt: t0,
+		}
+		if err := s.SaveProfile(ctx, p); err != nil {
+			t.Fatalf("SaveProfile(%q): %v", name, err)
+		}
+	}
+
+	got, err := s.ListProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListProfiles: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("ListProfiles: got %d profiles, want 3", len(got))
+	}
+	want := []string{"alpha", "bravo", "charlie"}
+	for i, p := range got {
+		if p.Name != want[i] {
+			t.Errorf("profile[%d].Name = %q, want %q", i, p.Name, want[i])
+		}
+	}
+}
+
+func TestDeleteProfileRemovesRow(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	t0 := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	p := contracts.Profile{
+		Name: "work", ConfigDir: "/p/work",
+		CreatedAt: t0, LastUsedAt: t0,
+	}
+	if err := s.SaveProfile(ctx, p); err != nil {
+		t.Fatalf("SaveProfile: %v", err)
+	}
+
+	if err := s.DeleteProfile(ctx, "work"); err != nil {
+		t.Fatalf("DeleteProfile: %v", err)
+	}
+
+	if _, err := s.GetProfile(ctx, "work"); !errors.Is(err, contracts.ErrProfileNotFound) {
+		t.Errorf("after delete, GetProfile err = %v, want ErrProfileNotFound", err)
+	}
+}
+
+func TestDeleteProfileUnknownReturnsNotFound(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	err := s.DeleteProfile(ctx, "ghost")
+	if !errors.Is(err, contracts.ErrProfileNotFound) {
+		t.Errorf("DeleteProfile(ghost) err = %v, want ErrProfileNotFound", err)
+	}
+}
