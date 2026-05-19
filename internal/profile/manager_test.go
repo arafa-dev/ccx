@@ -1,9 +1,14 @@
 package profile_test
 
 import (
+	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/arafa-dev/ccx/internal/contracts"
 	"github.com/arafa-dev/ccx/internal/profile"
 )
 
@@ -28,5 +33,99 @@ func TestNewManagerCreatesRoot(t *testing.T) {
 func TestNewManagerRejectsEmptyRoot(t *testing.T) {
 	if _, err := profile.NewManager(""); err == nil {
 		t.Fatal("NewManager(\"\") should return an error")
+	}
+}
+
+func newTestManager(t *testing.T) *profile.Manager {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "ccx-home")
+	mgr, err := profile.NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	return mgr
+}
+
+func makeAbsDir(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	return dir
+}
+
+func TestAddPersistsProfile(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "work")
+
+	p := contracts.Profile{
+		Name:       "work",
+		ConfigDir:  cfg,
+		Label:      "Work",
+		Color:      "#3B82F6",
+		CreatedAt:  time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC),
+		LastUsedAt: time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC),
+	}
+	if err := mgr.Add(ctx, p); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	// File should exist with mode 0600.
+	info, err := os.Stat(mgr.Path())
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestAddRejectsRelativeConfigDir(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: "relative/x"})
+	if !errors.Is(err, contracts.ErrInvalidConfigDir) {
+		t.Fatalf("expected ErrInvalidConfigDir, got %v", err)
+	}
+}
+
+func TestAddRejectsEmptyName(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "x")
+	err := mgr.Add(ctx, contracts.Profile{Name: "", ConfigDir: cfg})
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}
+
+func TestAddRejectsDuplicateName(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg1 := makeAbsDir(t, "work")
+	cfg2 := makeAbsDir(t, "work2")
+
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg1}); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+	err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg2})
+	if !errors.Is(err, contracts.ErrProfileAlreadyExists) {
+		t.Fatalf("expected ErrProfileAlreadyExists, got %v", err)
+	}
+}
+
+func TestAddCreatesMissingConfigDir(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	// ConfigDir does not exist yet - Add should create it.
+	cfg := filepath.Join(t.TempDir(), "to-be-created", "work")
+
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, err := os.Stat(cfg); err != nil {
+		t.Errorf("expected ConfigDir to be created, stat err: %v", err)
 	}
 }
