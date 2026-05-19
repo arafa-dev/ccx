@@ -1,0 +1,32 @@
+# Binaries
+/ccx
+/cmd/ccx/ccx
+/dist/
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Web build output (committed via go:embed only when building releases)
+web/node_modules/
+web/.next/
+web/out/
+
+# Local state
+.env
+.env.local
+*.local
+
+# Worktrees parent dir if user keeps them under repo
+ccx-*/
