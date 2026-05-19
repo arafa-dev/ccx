@@ -1,0 +1,142 @@
+openapi: 3.1.0
+info:
+  title: ccx local API
+  version: 0.1.0
+  description: |
+    Local HTTP API served by `ccx dashboard`. Always bound to 127.0.0.1.
+    No authentication (localhost-only). All endpoints return JSON unless noted.
+
+servers:
+  - url: http://127.0.0.1:7777
+    description: Default local server
+
+security: []
+
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      responses:
+        "200":
+          description: Server is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, version]
+                properties:
+                  ok:      { type: boolean }
+                  version: { type: string  }
+
+  /api/profiles:
+    get:
+      summary: List all registered profiles with today's totals
+      operationId: listProfiles
+      responses:
+        "200":
+          description: A list of profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProfileWithTotals"
+
+  /api/usage:
+    get:
+      summary: Aggregated usage rows
+      operationId: getUsage
+      parameters:
+        - in: query
+          name: profile
+          schema: { type: string }
+          description: Filter to one profile. Omit for all.
+        - in: query
+          name: project
+          schema: { type: string }
+          description: Filter to one project. Omit for all.
+        - in: query
+          name: since
+          schema: { type: string }
+          description: Duration string like "24h", "7d", "30d". Default "24h".
+      responses:
+        "200":
+          description: Aggregated usage rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows, total]
+                properties:
+                  rows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UsageRow"
+                  total:
+                    $ref: "#/components/schemas/UsageTotal"
+
+  /api/usage/live:
+    get:
+      summary: Server-Sent Events stream of usage updates
+      operationId: getUsageLive
+      description: |
+        Emits a `usage` event whenever a watched JSONL file changes.
+        The data payload is a JSON-encoded UsageRow array.
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+components:
+  schemas:
+    Profile:
+      type: object
+      required: [name, config_dir, created_at, last_used_at]
+      properties:
+        name:         { type: string }
+        config_dir:   { type: string }
+        label:        { type: string }
+        color:        { type: string }
+        created_at:   { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+
+    ProfileWithTotals:
+      allOf:
+        - $ref: "#/components/schemas/Profile"
+        - type: object
+          required: [today]
+          properties:
+            today:
+              $ref: "#/components/schemas/UsageTotal"
+
+    Usage:
+      type: object
+      required: [input_tokens, output_tokens, cache_read_tokens, cache_create_tokens]
+      properties:
+        input_tokens:        { type: integer }
+        output_tokens:       { type: integer }
+        cache_read_tokens:   { type: integer }
+        cache_create_tokens: { type: integer }
+
+    UsageRow:
+      type: object
+      required: [profile, day, usage, session_count, estimated_usd]
+      properties:
+        profile:        { type: string }
+        project:        { type: string }
+        model:          { type: string }
+        day:            { type: string, format: date-time }
+        usage:          { $ref: "#/components/schemas/Usage" }
+        session_count:  { type: integer }
+        estimated_usd:  { type: number, format: double }
+
+    UsageTotal:
+      type: object
+      required: [usage, estimated_usd]
+      properties:
+        usage:          { $ref: "#/components/schemas/Usage" }
+        estimated_usd:  { type: number, format: double }
