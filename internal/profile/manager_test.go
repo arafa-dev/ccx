@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -437,5 +438,79 @@ func TestManagerSurvivesLeftoverTmpFile(t *testing.T) {
 	}
 	if _, err := os.Stat(mgr.Path() + ".tmp"); !os.IsNotExist(err) {
 		t.Errorf("stale .tmp should be gone after successful Add, got err=%v", err)
+	}
+}
+
+func TestConcurrentReadsAreSafe(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	for _, name := range []string{"a", "b", "c", "d"} {
+		cfg := makeAbsDir(t, name)
+		if err := mgr.Add(ctx, contracts.Profile{Name: name, ConfigDir: cfg}); err != nil {
+			t.Fatalf("Add %s: %v", name, err)
+		}
+	}
+
+	const workers = 16
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	errCh := make(chan error, workers)
+
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				if _, err := mgr.List(ctx); err != nil {
+					errCh <- err
+					return
+				}
+				if _, err := mgr.Get(ctx, "b"); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatalf("concurrent read error: %v", err)
+	}
+}
+
+func TestConcurrentManagersOnDistinctRootsAreSafe(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	const workers = 8
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	errCh := make(chan error, workers)
+
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			mgr := newTestManager(t)
+			cfg := makeAbsDir(t, "w")
+			if err := mgr.Add(ctx, contracts.Profile{Name: "w", ConfigDir: cfg}); err != nil {
+				errCh <- err
+				return
+			}
+			if _, err := mgr.Get(ctx, "w"); err != nil {
+				errCh <- err
+				return
+			}
+			if err := mgr.Remove(ctx, "w"); err != nil {
+				errCh <- err
+				return
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatalf("isolated-manager goroutine error: %v", err)
 	}
 }
