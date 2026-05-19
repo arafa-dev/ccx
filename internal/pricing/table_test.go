@@ -137,3 +137,85 @@ func TestCostUnknownModelLogsOnlyOnce(t *testing.T) {
 		}
 	}
 }
+
+const multiEffectiveYAML = `
+last_updated: 2026-06-01
+models:
+  - model: claude-opus-4-7
+    effective_from: 2026-01-15
+    input_per_mtok: 15.00
+    output_per_mtok: 75.00
+    cache_read_per_mtok: 1.50
+    cache_create_per_mtok: 18.75
+  - model: claude-opus-4-7
+    effective_from: 2026-06-01
+    input_per_mtok: 10.00
+    output_per_mtok: 50.00
+    cache_read_per_mtok: 1.00
+    cache_create_per_mtok: 12.50
+`
+
+func TestCostMultipleEffectiveFromPicksLatestOnOrBefore(t *testing.T) {
+	tbl, err := pricing.NewTableFromBytes([]byte(multiEffectiveYAML), nil)
+	if err != nil {
+		t.Fatalf("NewTableFromBytes: %v", err)
+	}
+
+	usage := contracts.Usage{InputTokens: 1_000_000}
+
+	tests := []struct {
+		name string
+		ts   time.Time
+		want float64
+	}{
+		{
+			name: "before earliest",
+			ts:   time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC),
+			want: 0,
+		},
+		{
+			name: "exactly at first effective_from",
+			ts:   time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
+			want: 15.00,
+		},
+		{
+			name: "between the two effective dates",
+			ts:   time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+			want: 15.00,
+		},
+		{
+			name: "exactly at second effective_from",
+			ts:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+			want: 10.00,
+		},
+		{
+			name: "after second effective_from",
+			ts:   time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+			want: 10.00,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tbl.Cost("claude-opus-4-7", tc.ts, usage)
+			if err != nil {
+				t.Fatalf("Cost: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("Cost @ %v = %.6f, want %.6f", tc.ts, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLastUpdatedReflectsLatestEffectiveFrom(t *testing.T) {
+	tbl, err := pricing.NewTableFromBytes([]byte(multiEffectiveYAML), nil)
+	if err != nil {
+		t.Fatalf("NewTableFromBytes: %v", err)
+	}
+
+	want := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	if got := tbl.LastUpdated(); !got.Equal(want) {
+		t.Errorf("LastUpdated = %v, want %v", got, want)
+	}
+}
