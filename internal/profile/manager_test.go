@@ -407,3 +407,35 @@ func TestActiveConfigDirNotInRegistryReturnsUnmanaged(t *testing.T) {
 		t.Fatalf("expected ErrNoActiveProfile, got %v", err)
 	}
 }
+
+func TestManagerSurvivesLeftoverTmpFile(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "work")
+
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	// Simulate a crash during a future write: a stale .tmp containing garbage.
+	if err := os.WriteFile(mgr.Path()+".tmp", []byte("garbage =="), 0o600); err != nil {
+		t.Fatalf("seed .tmp: %v", err)
+	}
+
+	got, err := mgr.Get(ctx, "work")
+	if err != nil {
+		t.Fatalf("Get after stale .tmp: %v", err)
+	}
+	if got.Name != "work" {
+		t.Errorf("got %q, want work", got.Name)
+	}
+
+	// Subsequent writes must still succeed and replace the .tmp cleanly.
+	cfg2 := makeAbsDir(t, "side")
+	if err := mgr.Add(ctx, contracts.Profile{Name: "side", ConfigDir: cfg2}); err != nil {
+		t.Fatalf("Add after stale .tmp: %v", err)
+	}
+	if _, err := os.Stat(mgr.Path() + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("stale .tmp should be gone after successful Add, got err=%v", err)
+	}
+}
