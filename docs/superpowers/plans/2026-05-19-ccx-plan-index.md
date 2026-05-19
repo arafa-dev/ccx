@@ -33,30 +33,24 @@ Each row below is a plan. Plans must be executed in the order dictated by their 
 
 | ID | Plan | Goal | Depends on | Status | Worktree |
 |---|---|---|---|---|---|
-| **P0** | [Phase 0 — Contracts](./2026-05-19-ccx-phase-0-contracts.md) | Lock down types, interfaces, schema, openapi, conventions, CI skeleton | — | **Ready** | `main` |
-| **A1** | Phase 1 — `internal/profile/` | Profile model, TOML registry I/O, validation, CRUD | P0 | *Pending plan* | `feat/profile` |
-| **A2** | Phase 1 — `internal/scanner/` | JSONL parser, dir walker, fuzz tests | P0 | *Pending plan* | `feat/scanner` |
-| **A3** | Phase 1 — `internal/storage/` | SQLite layer, migrations, scan-cursor logic | P0 | *Pending plan* | `feat/storage` |
-| **A4** | Phase 1 — `internal/pricing/` | YAML loader, cost calc by model + date | P0 | *Pending plan* | `feat/pricing` |
-| **A5** | Phase 1 — `internal/shell/` | POSIX + PowerShell + fish snippet generators | P0 | *Pending plan* | `feat/shell` |
-| **A6** | Phase 1 — `internal/platform/` | OS detection, default config dir resolution | P0 | *Pending plan* | `feat/platform` |
-| **A7** | Phase 1 — `web/` (Next.js) | Dashboard frontend, mocks API via MSW | P0 (openapi.yaml only) | *Pending plan* | `feat/web` |
-| **A8** | Phase 1 — Distribution | `.goreleaser.yaml`, Homebrew + Scoop taps, install.sh | P0 | *Pending plan* | `feat/distribution` |
-| **A9** | Phase 1 — Docs | README, architecture diagram, vhs GIF tape, contributing | P0 | *Pending plan* | `feat/docs` |
-| **P2** | Phase 2 — Integration | cli, server, tui, doctor, dashboard glue, e2e tests | A1–A9 merged | *Pending plan* | `main` |
-| **P3** | Phase 3 — Polish & launch | Friend-test, fix friction, record GIFs, tag v0.1.0, HN launch | P2 | *Pending plan* | `main` |
+| **P0** | [Phase 0 — Contracts](./2026-05-19-ccx-phase-0-contracts.md) | Lock down types, interfaces, schema, openapi, conventions, CI skeleton | — | ✅ **Executed by Codex** | `main` |
+| **A1** | [Phase 1 — `internal/profile/`](./2026-05-19-ccx-phase-1-A1-profile.md) | Profile model, TOML registry I/O, validation, CRUD | P0 | Ready | `feat/profile` |
+| **A2** | [Phase 1 — `internal/scanner/`](./2026-05-19-ccx-phase-1-A2-scanner.md) | JSONL parser, dir walker, fuzz tests | P0 | Ready | `feat/scanner` |
+| **A3** | [Phase 1 — `internal/storage/`](./2026-05-19-ccx-phase-1-A3-storage.md) | SQLite layer, migrations, scan-cursor logic | P0 | Ready | `feat/storage` |
+| **A4** | [Phase 1 — `internal/pricing/`](./2026-05-19-ccx-phase-1-A4-pricing.md) | YAML loader, cost calc by model + date | P0 | Ready | `feat/pricing` |
+| **A5** | [Phase 1 — `internal/shell/`](./2026-05-19-ccx-phase-1-A5-shell.md) | POSIX + PowerShell + fish snippet generators | P0 | Ready | `feat/shell` |
+| **A6** | [Phase 1 — `internal/platform/`](./2026-05-19-ccx-phase-1-A6-platform.md) | OS detection, default config dir resolution | P0 | Ready | `feat/platform` |
+| **A7** | [Phase 1 — `web/` (Next.js)](./2026-05-19-ccx-phase-1-A7-web.md) | Dashboard frontend, mocks API via MSW | P0 (openapi.yaml only) | Ready | `feat/web` |
+| **A8** | [Phase 1 — Distribution](./2026-05-19-ccx-phase-1-A8-distribution.md) | `.goreleaser.yaml`, Homebrew + Scoop taps, install.sh | P0 | Ready | `feat/distribution` |
+| **A9** | [Phase 1 — Docs](./2026-05-19-ccx-phase-1-A9-docs.md) | README, architecture diagram, vhs GIF tape, contributing | P0 | Ready | `feat/docs` |
+| **P2** | [Phase 2 — Integration](./2026-05-19-ccx-phase-2-integration.md) | cli, server, tui, doctor, dashboard glue, e2e tests | A1–A9 merged | Ready | `main` (or `feat/integration`) |
+| **P3** | [Phase 3 — Polish & launch](./2026-05-19-ccx-phase-3-polish-launch.md) | Friend-test, fix friction, record GIFs, tag v0.1.0, HN launch | P2 | Ready | `main` |
 
 ---
 
-## Why some plans are deferred
+## Plan status
 
-Plans A1–A9, P2, and P3 are not written yet because:
-
-1. **Contract drift risk.** Their task content (types, interfaces, file names) depends on exact decisions locked down in Phase 0. Writing them speculatively means rewriting them after Phase 0 lands.
-2. **Token cost.** Each plan is several thousand lines of detailed task content with no placeholders. Writing all 12 up front is wasteful when 11 are downstream of P0.
-3. **Just-in-time planning is more accurate.** Each plan is written against the *actual* state of `main` at the time, not an assumed state.
-
-**Trigger to write the next plan:** When P0 is merged to `main`, request the next plan (e.g., "write A1") and the agent will write it against the real Phase 0 output.
+All 12 plans are written and the project is ready for Codex agent handoff. Phase 0 has been executed by Codex; the live contracts in `internal/contracts/` are the source of truth for any plan content that disagrees (a couple of small drifts: `Store.InsertEvents` now takes `profileName` explicitly; `UsageRow` carries JSON tags). Worktrees can be created and Phase 1 agents dispatched in parallel against `main`.
 
 ---
 
