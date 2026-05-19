@@ -364,7 +364,9 @@ func buildDeps(ctx context.Context) (*Deps, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
-	profMgr, err := profile.NewManager(filepath.Join(home, "profiles.toml"))
+	// A1 ships NewManager(root string) where root is the ccx state dir
+	// (~/.ccx); the manager constructs profiles.toml path internally.
+	profMgr, err := profile.NewManager(home)
 	if err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("profile manager: %w", err)
@@ -379,14 +381,33 @@ func buildDeps(ctx context.Context) (*Deps, error) {
 	return &Deps{
 		Store:    store,
 		Profiles: profMgr,
-		Scanner:  scanner.New(scanner.StoreCursorAdapter(store)),
-		Pricing:  priceTab,
-		Shell:    shell.New(),
+		// A2 ships NewScanner(scanner.CursorStore). A2 only provides
+		// NewMemoryCursorStore for tests, so we adapt our Store here.
+		Scanner: scanner.NewScanner(&storeCursorAdapter{store: store}),
+		Pricing: priceTab,
+		Shell:   shell.New(),
 	}, nil
+}
+
+// storeCursorAdapter bridges contracts.Store's GetCursor/SetCursor methods to
+// scanner.CursorStore. Defined here (Phase 2) rather than in A2 because the
+// bridge requires importing both `internal/storage` and `internal/scanner`,
+// which Phase 1 worktrees are not allowed to do.
+type storeCursorAdapter struct {
+	store contracts.Store
+}
+
+func (a *storeCursorAdapter) Get(ctx context.Context, profile, file string) (scanner.Cursor, error) {
+	off, ino, err := a.store.GetCursor(ctx, profile, file)
+	return scanner.Cursor{Offset: off, Inode: ino}, err
+}
+
+func (a *storeCursorAdapter) Set(ctx context.Context, profile, file string, c scanner.Cursor) error {
+	return a.store.SetCursor(ctx, profile, file, c.Offset, c.Inode)
 }
 ```
 
-Note: This file references `profile.NewManager`, `scanner.New`, `scanner.StoreCursorAdapter`, `shell.New`, `pricing.NewTable`, `platform.CCXHome`, `storage.NewStore`. Verify each exists with the expected signature; if any A1–A6 plan defined a different constructor name, open a contract-amendment issue and pause. Do not edit Phase 1 packages from this worktree.
+Note: This file references `profile.NewManager(root)`, `scanner.NewScanner`, `scanner.CursorStore`, `scanner.Cursor`, `shell.New`, `pricing.NewTable`, `platform.CCXHome`, `storage.NewStore`. **Before writing this file, open each A1–A6 plan and confirm the constructor name and signature.** If A2 defined `CursorStore.Get/Set` with a different signature than shown above (the adapter must match the interface A2 actually declares), fix only the adapter methods in this file to match.
 
 - [ ] **Step 2: Verify build**
 

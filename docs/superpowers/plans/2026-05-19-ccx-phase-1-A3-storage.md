@@ -33,6 +33,27 @@ cd ../ccx-storage
 
 ---
 
+## ⚠️ Amendment (post-Phase-0)
+
+This plan was drafted before Phase 0 was executed. During Phase 0 Codex updated `contracts.Store.InsertEvents` to take `profileName` explicitly:
+
+```go
+// Before (in this plan's original body):
+InsertEvents(ctx context.Context, events []Event) error
+// After (the actual interface on main):
+InsertEvents(ctx context.Context, profileName string, events []Event) error
+```
+
+The plan body still uses an older two-method workaround (a stub `InsertEvents` plus a real `InsertEventsForProfile`). **Apply this rename mentally as you execute every task that follows:**
+
+- Every occurrence of `InsertEventsForProfile` in this plan = the single real method `InsertEvents`.
+- The stub `InsertEvents(ctx, events)` documented in Task 7 (lines beginning "InsertEvents writes events to the store… returns ErrNoActiveProfile") **must be omitted** — do not write it. The signature it documents is wrong.
+- The empty-batch test (`TestInsertEventsEmpty`) calls `s.InsertEvents(ctx, nil)` and `s.InsertEvents(ctx, []contracts.Event{})` — pass a profile name as the second arg: `s.InsertEvents(ctx, "work", nil)`.
+
+If you prefer, do a single editor-wide find-and-replace `InsertEventsForProfile` → `InsertEvents` before starting, then delete the stub block in Task 7.
+
+---
+
 ## Pre-flight
 
 Confirm the worktree is on `feat/storage`, the working tree is clean, and Phase 0 outputs exist.
