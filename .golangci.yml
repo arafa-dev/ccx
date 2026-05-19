@@ -1,0 +1,71 @@
+version: "2"
+run:
+  timeout: 5m
+  go: "1.22"
+  tests: true
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - prealloc
+    - revive
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+  settings:
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+          disabled: false
+  exclusions:
+    generated: lax
+    rules:
+      - linters:
+          - lll
+        path: testdata/
+      - linters:
+          - gocritic
+          - revive
+        path: _test\.go
+      # Existing bare contract sentinel; keep exported-comment checks everywhere else.
+      - linters:
+          - revive
+        path: internal/contracts/types.go
+        text: "exported const ShellUnknown should have comment"
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
