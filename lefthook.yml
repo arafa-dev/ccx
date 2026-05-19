@@ -1,12 +1,12 @@
 pre-commit:
-  parallel: true
+  parallel: false
   commands:
     gofumpt:
       glob: "*.go"
       run: |
         if ! command -v gofumpt >/dev/null 2>&1; then
-          echo "gofumpt not installed; skip"
-          exit 0
+          echo "gofumpt is required for pre-commit hooks. Install it with: go install mvdan.cc/gofumpt@latest"
+          exit 1
         fi
         gofumpt -l -w {staged_files}
         git add {staged_files}
@@ -14,7 +14,7 @@ pre-commit:
       glob: "*.go"
       run: |
         if ! command -v golangci-lint >/dev/null 2>&1; then
-          echo "golangci-lint not installed; skip"
-          exit 0
+          echo "golangci-lint is required for pre-commit hooks. Install it with: brew install golangci-lint"
+          exit 1
         fi
-        golangci-lint run --new-from-rev=HEAD~1 ./...
+        golangci-lint run ./...
