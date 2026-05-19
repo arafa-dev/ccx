@@ -143,3 +143,40 @@ func TestAddRejectsDuplicateConfigDir(t *testing.T) {
 		t.Fatalf("expected ErrConfigDirConflict, got %v", err)
 	}
 }
+
+func TestGetReturnsProfile(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "work")
+
+	in := contracts.Profile{Name: "work", ConfigDir: cfg}
+	if err := mgr.Add(ctx, in); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	got, err := mgr.Get(ctx, "work")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Name != "work" || got.ConfigDir != cfg {
+		t.Errorf("got = %+v, want name=work config=%q", got, cfg)
+	}
+}
+
+func TestGetMissingProfileReturnsSentinel(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+
+	_, err := mgr.Get(ctx, "ghost")
+	if !errors.Is(err, contracts.ErrProfileNotFound) {
+		t.Fatalf("expected ErrProfileNotFound, got %v", err)
+	}
+}
+
+func TestGetEmptyNameIsError(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	if _, err := mgr.Get(ctx, ""); err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}

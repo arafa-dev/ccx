@@ -115,3 +115,28 @@ func ensureConfigDir(path string) error {
 		return fmt.Errorf("stat %q: %w", path, err)
 	}
 }
+
+// Get returns the profile with the given name. If no such profile exists,
+// the returned error wraps contracts.ErrProfileNotFound.
+func (m *Manager) Get(ctx context.Context, name string) (contracts.Profile, error) {
+	if err := ctx.Err(); err != nil {
+		return contracts.Profile{}, err
+	}
+	if name == "" {
+		return contracts.Profile{}, fmt.Errorf("profile: name is empty")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	reg, err := loadRegistry(m.Path())
+	if err != nil {
+		return contracts.Profile{}, err
+	}
+	for _, p := range reg.Profiles {
+		if p.Name == name {
+			return p, nil
+		}
+	}
+	return contracts.Profile{}, fmt.Errorf("profile %q: %w", name, contracts.ErrProfileNotFound)
+}
