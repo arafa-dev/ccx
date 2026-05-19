@@ -198,3 +198,41 @@ func (m *Manager) Remove(ctx context.Context, name string) error {
 	}
 	return nil
 }
+
+// MarkUsed updates the LastUsedAt field of the named profile to time.Now()
+// in UTC. It is intended to be called by the cli layer after `ccx use`
+// successfully emits an activation script. If no such profile exists, the
+// returned error wraps contracts.ErrProfileNotFound.
+func (m *Manager) MarkUsed(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if name == "" {
+		return fmt.Errorf("profile: name is empty")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	reg, err := loadRegistry(m.Path())
+	if err != nil {
+		return err
+	}
+
+	idx := -1
+	for i, p := range reg.Profiles {
+		if p.Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("profile %q: %w", name, contracts.ErrProfileNotFound)
+	}
+
+	reg.Profiles[idx].LastUsedAt = time.Now().UTC()
+	if err := atomicWriteRegistry(m.Path(), reg); err != nil {
+		return fmt.Errorf("saving registry: %w", err)
+	}
+	return nil
+}

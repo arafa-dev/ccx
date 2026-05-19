@@ -270,3 +270,46 @@ func TestRemovePreservesOtherProfiles(t *testing.T) {
 		t.Errorf("expected [b], got %+v", got)
 	}
 }
+
+func TestMarkUsedUpdatesTimestamp(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "work")
+
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	in := contracts.Profile{
+		Name:       "work",
+		ConfigDir:  cfg,
+		CreatedAt:  old,
+		LastUsedAt: old,
+	}
+	if err := mgr.Add(ctx, in); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	before := time.Now().UTC().Add(-1 * time.Second)
+	if err := mgr.MarkUsed(ctx, "work"); err != nil {
+		t.Fatalf("MarkUsed: %v", err)
+	}
+	after := time.Now().UTC().Add(1 * time.Second)
+
+	got, err := mgr.Get(ctx, "work")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.LastUsedAt.Before(before) || got.LastUsedAt.After(after) {
+		t.Errorf("LastUsedAt %v not in [%v, %v]", got.LastUsedAt, before, after)
+	}
+	if !got.CreatedAt.Equal(old) {
+		t.Errorf("CreatedAt should be untouched, got %v want %v", got.CreatedAt, old)
+	}
+}
+
+func TestMarkUsedMissingProfileReturnsSentinel(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	err := mgr.MarkUsed(ctx, "ghost")
+	if !errors.Is(err, contracts.ErrProfileNotFound) {
+		t.Fatalf("expected ErrProfileNotFound, got %v", err)
+	}
+}
