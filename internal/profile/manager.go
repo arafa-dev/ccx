@@ -75,6 +75,9 @@ func (m *Manager) Add(ctx context.Context, p contracts.Profile) error { //nolint
 		if existing.Name == p.Name {
 			return fmt.Errorf("profile %q: %w", p.Name, contracts.ErrProfileAlreadyExists)
 		}
+		if existing.ConfigDir == p.ConfigDir {
+			return fmt.Errorf("config_dir %q already used by profile %q: %w", p.ConfigDir, existing.Name, contracts.ErrConfigDirConflict)
+		}
 	}
 
 	now := time.Now().UTC()

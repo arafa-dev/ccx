@@ -129,3 +129,17 @@ func TestAddCreatesMissingConfigDir(t *testing.T) {
 		t.Errorf("expected ConfigDir to be created, stat err: %v", err)
 	}
 }
+
+func TestAddRejectsDuplicateConfigDir(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "shared")
+
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg}); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+	err := mgr.Add(ctx, contracts.Profile{Name: "personal", ConfigDir: cfg})
+	if !errors.Is(err, contracts.ErrConfigDirConflict) {
+		t.Fatalf("expected ErrConfigDirConflict, got %v", err)
+	}
+}
