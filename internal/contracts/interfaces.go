@@ -25,8 +25,9 @@ type Store interface {
 	ListProfiles(ctx context.Context) ([]Profile, error)
 	DeleteProfile(ctx context.Context, name string) error
 
-	// Event ingestion
-	InsertEvents(ctx context.Context, events []Event) error
+	// Event ingestion. Events come from raw JSONL and do not carry profile
+	// context, so callers must pass the profile name explicitly.
+	InsertEvents(ctx context.Context, profileName string, events []Event) error
 
 	// Usage queries
 	QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, error)

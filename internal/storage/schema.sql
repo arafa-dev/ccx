@@ -4,7 +4,7 @@
 -- a contract-amendment PR against main instead.
 
 CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER NOT NULL
+    version INTEGER PRIMARY KEY
 );
 
 CREATE TABLE IF NOT EXISTS profiles (
