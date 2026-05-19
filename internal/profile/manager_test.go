@@ -180,3 +180,42 @@ func TestGetEmptyNameIsError(t *testing.T) {
 		t.Fatal("expected error for empty name")
 	}
 }
+
+func TestListReturnsEmptyOnFreshManager(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+
+	got, err := mgr.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty list, got %d", len(got))
+	}
+}
+
+func TestListReturnsAllProfilesSortedByName(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+
+	for _, name := range []string{"work", "alpha", "side"} {
+		cfg := makeAbsDir(t, name)
+		if err := mgr.Add(ctx, contracts.Profile{Name: name, ConfigDir: cfg}); err != nil {
+			t.Fatalf("Add(%s): %v", name, err)
+		}
+	}
+
+	got, err := mgr.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	want := []string{"alpha", "side", "work"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		if got[i].Name != w {
+			t.Errorf("[%d] = %q, want %q", i, got[i].Name, w)
+		}
+	}
+}

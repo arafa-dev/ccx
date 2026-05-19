@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -139,4 +140,24 @@ func (m *Manager) Get(ctx context.Context, name string) (contracts.Profile, erro
 		}
 	}
 	return contracts.Profile{}, fmt.Errorf("profile %q: %w", name, contracts.ErrProfileNotFound)
+}
+
+// List returns all profiles, sorted by Name. The returned slice is a fresh
+// copy; mutating it does not affect the on-disk registry.
+func (m *Manager) List(ctx context.Context) ([]contracts.Profile, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	reg, err := loadRegistry(m.Path())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]contracts.Profile, len(reg.Profiles))
+	copy(out, reg.Profiles)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
