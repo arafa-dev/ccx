@@ -79,13 +79,13 @@ type UsageQuery struct {
 // granularity (per-profile, per-day, per-project) is determined by the
 // concrete Store implementation.
 type UsageRow struct {
-	Profile      string
-	Project      string
-	Model        string
-	Day          time.Time // truncated to start of day in UTC
-	Usage        Usage
-	SessionCount int
-	EstimatedUSD float64 // populated by the caller after pricing lookup
+	Profile      string    `json:"profile"`
+	Project      string    `json:"project,omitempty"`
+	Model        string    `json:"model,omitempty"`
+	Day          time.Time `json:"day"` // truncated to start of day in UTC
+	Usage        Usage     `json:"usage"`
+	SessionCount int       `json:"session_count"`
+	EstimatedUSD float64   `json:"estimated_usd"` // populated by the caller after pricing lookup
 }
 
 // Shell identifies a shell flavor for the purpose of emitting init scripts

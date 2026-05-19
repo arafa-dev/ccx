@@ -59,6 +59,39 @@ func TestUsageTotalTokens(t *testing.T) {
 	}
 }
 
+func TestUsageRowJSONUsesContractFieldNames(t *testing.T) {
+	row := contracts.UsageRow{
+		Profile:      "work",
+		Project:      "ccx",
+		Model:        "claude-opus-4-7",
+		Day:          time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC),
+		Usage:        contracts.Usage{InputTokens: 100, OutputTokens: 50},
+		SessionCount: 2,
+		EstimatedUSD: 0.42,
+	}
+
+	data, err := json.Marshal(row)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal fields: %v", err)
+	}
+
+	for _, name := range []string{"profile", "project", "model", "day", "usage", "session_count", "estimated_usd"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled UsageRow missing field %q in %s", name, data)
+		}
+	}
+	for _, name := range []string{"Profile", "Project", "Model", "Day", "Usage", "SessionCount", "EstimatedUSD"} {
+		if _, ok := fields[name]; ok {
+			t.Errorf("marshaled UsageRow included Go field name %q in %s", name, data)
+		}
+	}
+}
+
 func TestEventJSONRoundtrip(t *testing.T) {
 	in := contracts.Event{
 		UUID:      "01H7Z8...",
