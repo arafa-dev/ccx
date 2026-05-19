@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: Install gofumpt
+        run: go install mvdan.cc/gofumpt@latest
+      - name: Check formatting
+        run: |
+          DIFF=$(gofumpt -l .)
+          if [ -n "$DIFF" ]; then
+            echo "::error::Files not formatted with gofumpt:"
+            echo "$DIFF"
+            exit 1
+          fi
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.11.3
+          args: --timeout=5m
+
+  test:
+    name: Test (${{ matrix.os }})
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: Build
+        # cmd/ccx may not exist yet during Phase 0; tolerate missing main.
+        run: |
+          if [ -d cmd/ccx ]; then
+            go build -trimpath -o /tmp/ccx ./cmd/ccx
+          else
+            echo "cmd/ccx not present yet; skipping binary build"
+          fi
+        shell: bash
