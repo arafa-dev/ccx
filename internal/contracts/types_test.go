@@ -121,3 +121,33 @@ func TestUsageQueryDefaults(t *testing.T) {
 		t.Errorf("default Profile should be empty (means all), got %q", q.Profile)
 	}
 }
+
+func TestParseShell(t *testing.T) {
+	tests := []struct {
+		in   string
+		want contracts.Shell
+		ok   bool
+	}{
+		{"zsh", contracts.ShellZsh, true},
+		{"bash", contracts.ShellBash, true},
+		{"fish", contracts.ShellFish, true},
+		{"pwsh", contracts.ShellPowerShell, true},
+		{"powershell", contracts.ShellPowerShell, true},
+		{"unknown", contracts.ShellUnknown, false},
+		{"", contracts.ShellUnknown, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			got, ok := contracts.ParseShell(tc.in)
+			if got != tc.want || ok != tc.ok {
+				t.Errorf("ParseShell(%q) = (%v, %v), want (%v, %v)", tc.in, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestShellString(t *testing.T) {
+	if got, want := contracts.ShellZsh.String(), "zsh"; got != want {
+		t.Errorf("ShellZsh.String() = %q want %q", got, want)
+	}
+}

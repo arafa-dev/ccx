@@ -87,3 +87,48 @@ type UsageRow struct {
 	SessionCount int
 	EstimatedUSD float64 // populated by the caller after pricing lookup
 }
+
+// Shell identifies a shell flavor for the purpose of emitting init scripts
+// and `ccx use` shell-eval output.
+type Shell int
+
+const (
+	ShellUnknown Shell = iota
+	ShellZsh
+	ShellBash
+	ShellFish
+	ShellPowerShell
+)
+
+// String returns the canonical name of the shell.
+func (s Shell) String() string {
+	switch s {
+	case ShellZsh:
+		return "zsh"
+	case ShellBash:
+		return "bash"
+	case ShellFish:
+		return "fish"
+	case ShellPowerShell:
+		return "pwsh"
+	default:
+		return "unknown"
+	}
+}
+
+// ParseShell parses a shell name. Accepts "zsh", "bash", "fish", "pwsh",
+// "powershell". Returns (ShellUnknown, false) for unknown input.
+func ParseShell(s string) (Shell, bool) {
+	switch s {
+	case "zsh":
+		return ShellZsh, true
+	case "bash":
+		return ShellBash, true
+	case "fish":
+		return ShellFish, true
+	case "pwsh", "powershell":
+		return ShellPowerShell, true
+	default:
+		return ShellUnknown, false
+	}
+}
