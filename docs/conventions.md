@@ -16,8 +16,9 @@ main, not a feature-branch edit.
 ## 2. Error handling
 
 - Always wrap with context: `fmt.Errorf("loading profile %q: %w", name, err)`.
-- Define a sentinel in `internal/contracts/errors.go` for any error a *caller*
-  might want to detect. Use `errors.Is` to detect.
+- Define shared sentinel errors in `internal/contracts/errors.go` when multiple
+  packages need to detect them. Package-local sentinel errors may live in their
+  package when they are specific to that package API. Use `errors.Is` to detect.
 - Do not return raw `errors.New(...)` from a public function for a known case —
   add a sentinel.
 - Do not log AND return; one or the other (callers log at the boundary).
