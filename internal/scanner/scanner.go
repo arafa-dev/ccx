@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
 )
@@ -41,24 +42,69 @@ func (s *Scanner) Scan(ctx context.Context, profile contracts.Profile) (<-chan c
 	events := make(chan contracts.Event, 256)
 	errs := make(chan error, 1)
 
-	go func() {
-		defer close(events)
-		defer close(errs)
-
-		files, err := s.listJSONL(profile.ConfigDir)
-		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) {
-				errs <- err
-			}
-			return
-		}
-
-		_ = files
-		_ = ctx
-		// File processing is added in later tasks.
-	}()
+	go s.run(ctx, profile.Name, profile.ConfigDir, events, errs)
 
 	return events, errs
+}
+
+func (s *Scanner) run(ctx context.Context, profileName, configDir string, events chan<- contracts.Event, errs chan<- error) {
+	defer close(events)
+	defer close(errs)
+
+	files, err := s.listJSONL(configDir)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			errs <- err
+		}
+		return
+	}
+	if len(files) == 0 {
+		return
+	}
+
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	for range s.workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				s.processFile(ctx, profileName, path, events)
+			}
+		}()
+	}
+
+	for _, p := range files {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			errs <- ctx.Err()
+			return
+		case jobs <- p:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
+func (s *Scanner) processFile(ctx context.Context, profileName, path string, out chan<- contracts.Event) {
+	cur, err := s.cursors.Get(ctx, profileName, path)
+	if err != nil {
+		s.logger.Warn("scanner: cursor get failed", "path", path, "err", err)
+		return
+	}
+
+	project := projectNameFromDir(filepath.Base(filepath.Dir(path)))
+	end, inode, err := readFile(ctx, path, project, cur, out)
+	if err != nil {
+		s.logger.Warn("scanner: read failed", "path", path, "err", err)
+		return
+	}
+
+	if err := s.cursors.Set(ctx, profileName, path, Cursor{Offset: end, Inode: inode}); err != nil {
+		s.logger.Warn("scanner: cursor set failed", "path", path, "err", err)
+	}
 }
 
 // listJSONL returns every <configDir>/projects/<project>/<session>.jsonl file.
