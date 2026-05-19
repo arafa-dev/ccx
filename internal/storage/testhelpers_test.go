@@ -33,3 +33,17 @@ func (s *Store) SchemaVersion(ctx context.Context, t *testing.T) int {
 	}
 	return v
 }
+
+// CountEvents returns the number of rows in events for the given profile.
+// Test-only helper.
+func (s *Store) CountEvents(ctx context.Context, t *testing.T, profileName string) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM events WHERE profile_name = ?`, profileName,
+	).Scan(&n); err != nil {
+		t.Fatalf("CountEvents: %v", err)
+	}
+	return n
+}
