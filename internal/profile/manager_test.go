@@ -219,3 +219,54 @@ func TestListReturnsAllProfilesSortedByName(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveDeletesProfile(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "work")
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if err := mgr.Remove(ctx, "work"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	_, err := mgr.Get(ctx, "work")
+	if !errors.Is(err, contracts.ErrProfileNotFound) {
+		t.Fatalf("after Remove, Get should return ErrProfileNotFound, got %v", err)
+	}
+}
+
+func TestRemoveMissingProfileReturnsSentinel(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	err := mgr.Remove(ctx, "ghost")
+	if !errors.Is(err, contracts.ErrProfileNotFound) {
+		t.Fatalf("expected ErrProfileNotFound, got %v", err)
+	}
+}
+
+func TestRemovePreservesOtherProfiles(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfgA := makeAbsDir(t, "a")
+	cfgB := makeAbsDir(t, "b")
+	if err := mgr.Add(ctx, contracts.Profile{Name: "a", ConfigDir: cfgA}); err != nil {
+		t.Fatalf("Add a: %v", err)
+	}
+	if err := mgr.Add(ctx, contracts.Profile{Name: "b", ConfigDir: cfgB}); err != nil {
+		t.Fatalf("Add b: %v", err)
+	}
+
+	if err := mgr.Remove(ctx, "a"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	got, err := mgr.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "b" {
+		t.Errorf("expected [b], got %+v", got)
+	}
+}

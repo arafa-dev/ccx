@@ -161,3 +161,40 @@ func (m *Manager) List(ctx context.Context) ([]contracts.Profile, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
+
+// Remove deletes the profile with the given name. If no such profile exists,
+// the returned error wraps contracts.ErrProfileNotFound. The file is rewritten
+// atomically only if the registry actually changed.
+func (m *Manager) Remove(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if name == "" {
+		return fmt.Errorf("profile: name is empty")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	reg, err := loadRegistry(m.Path())
+	if err != nil {
+		return err
+	}
+
+	idx := -1
+	for i, p := range reg.Profiles {
+		if p.Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("profile %q: %w", name, contracts.ErrProfileNotFound)
+	}
+
+	reg.Profiles = append(reg.Profiles[:idx], reg.Profiles[idx+1:]...)
+	if err := atomicWriteRegistry(m.Path(), reg); err != nil {
+		return fmt.Errorf("saving registry: %w", err)
+	}
+	return nil
+}
