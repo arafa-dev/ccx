@@ -16,12 +16,20 @@ import (
 // fileName is the canonical name of the registry file inside the ccx root.
 const fileName = "profiles.toml"
 
+// Environment variable names that control active-profile detection. Defined
+// here so tests and callers reference a single source of truth.
+const (
+	EnvActiveProfile = "CCX_ACTIVE_PROFILE"
+	EnvConfigDir     = "CLAUDE_CONFIG_DIR"
+)
+
 // Manager owns the profile registry at <root>/profiles.toml. All mutating
 // methods rewrite the whole file atomically. The zero Manager is not usable;
 // always construct via NewManager.
 type Manager struct {
-	root string
-	mu   sync.Mutex
+	root      string
+	lookupEnv func(string) (string, bool)
+	mu        sync.Mutex
 }
 
 // NewManager returns a Manager rooted at the given directory (typically
@@ -31,7 +39,7 @@ func NewManager(root string) (*Manager, error) {
 	if root == "" {
 		return nil, errors.New("profile: root path is empty")
 	}
-	return &Manager{root: root}, nil
+	return &Manager{root: root, lookupEnv: os.LookupEnv}, nil
 }
 
 // Root returns the registry root directory.
@@ -235,4 +243,54 @@ func (m *Manager) MarkUsed(ctx context.Context, name string) error {
 		return fmt.Errorf("saving registry: %w", err)
 	}
 	return nil
+}
+
+// Active returns the active profile, if any, plus a boolean indicating
+// whether one was found.
+//
+// Resolution order, per spec section 6:
+//  1. If CCX_ACTIVE_PROFILE is set, look it up in the registry.
+//     Found -> return (p, true, nil). Not found -> (zero, false, ErrProfileNotFound wrapped).
+//  2. Else, if CLAUDE_CONFIG_DIR is set, search the registry by ConfigDir.
+//     Found -> return (p, true, nil). Not found -> (zero, false, ErrNoActiveProfile wrapped)
+//     to indicate an "unmanaged" config dir.
+//  3. Else, return (zero, false, nil) - no active profile and no error.
+func (m *Manager) Active(ctx context.Context) (contracts.Profile, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return contracts.Profile{}, false, err
+	}
+
+	if name, ok := m.env(EnvActiveProfile); ok {
+		p, err := m.Get(ctx, name)
+		if err != nil {
+			return contracts.Profile{}, false, err
+		}
+		return p, true, nil
+	}
+
+	if cfg, ok := m.env(EnvConfigDir); ok {
+		m.mu.Lock()
+		reg, err := loadRegistry(m.Path())
+		m.mu.Unlock()
+		if err != nil {
+			return contracts.Profile{}, false, err
+		}
+		for _, p := range reg.Profiles {
+			if p.ConfigDir == cfg {
+				return p, true, nil
+			}
+		}
+		return contracts.Profile{}, false, fmt.Errorf("CLAUDE_CONFIG_DIR=%q not in registry: %w", cfg, contracts.ErrNoActiveProfile)
+	}
+
+	return contracts.Profile{}, false, nil
+}
+
+func (m *Manager) env(key string) (string, bool) {
+	lookupEnv := m.lookupEnv
+	if lookupEnv == nil {
+		lookupEnv = os.LookupEnv
+	}
+	value, ok := lookupEnv(key)
+	return value, ok && value != ""
 }

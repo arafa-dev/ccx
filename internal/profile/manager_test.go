@@ -313,3 +313,97 @@ func TestMarkUsedMissingProfileReturnsSentinel(t *testing.T) {
 		t.Fatalf("expected ErrProfileNotFound, got %v", err)
 	}
 }
+
+func TestActiveNoEnvReturnsNoActiveProfile(t *testing.T) {
+	t.Setenv("CCX_ACTIVE_PROFILE", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+
+	ctx := context.Background()
+	mgr := newTestManager(t)
+
+	_, ok, err := mgr.Active(ctx)
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if ok {
+		t.Errorf("expected ok=false when no env vars set")
+	}
+}
+
+func TestActiveByCCXActiveProfileEnv(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "work")
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	t.Setenv("CCX_ACTIVE_PROFILE", "work")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+
+	got, ok, err := mgr.Active(ctx)
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if got.Name != "work" || got.ConfigDir != cfg {
+		t.Errorf("got %+v, want name=work config=%q", got, cfg)
+	}
+}
+
+func TestActiveCCXActiveProfileNotInRegistryIsError(t *testing.T) {
+	t.Setenv("CCX_ACTIVE_PROFILE", "ghost")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+
+	ctx := context.Background()
+	mgr := newTestManager(t)
+
+	_, ok, err := mgr.Active(ctx)
+	if !errors.Is(err, contracts.ErrProfileNotFound) {
+		t.Fatalf("expected ErrProfileNotFound, got %v (ok=%v)", err, ok)
+	}
+}
+
+func TestActiveByConfigDirEnv(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "personal")
+	if err := mgr.Add(ctx, contracts.Profile{Name: "personal", ConfigDir: cfg}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	t.Setenv("CCX_ACTIVE_PROFILE", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+
+	got, ok, err := mgr.Active(ctx)
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if got.Name != "personal" {
+		t.Errorf("got name=%q, want personal", got.Name)
+	}
+}
+
+func TestActiveConfigDirNotInRegistryReturnsUnmanaged(t *testing.T) {
+	// CLAUDE_CONFIG_DIR is set but does not match any registered profile.
+	// Per spec section 6 ("Active-profile detection") this is reported as
+	// "unmanaged config" rather than an error: ok=false, err=ErrNoActiveProfile.
+	t.Setenv("CCX_ACTIVE_PROFILE", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "/nowhere/in/registry")
+
+	ctx := context.Background()
+	mgr := newTestManager(t)
+
+	_, ok, err := mgr.Active(ctx)
+	if ok {
+		t.Fatal("expected ok=false for unmanaged config dir")
+	}
+	if !errors.Is(err, contracts.ErrNoActiveProfile) {
+		t.Fatalf("expected ErrNoActiveProfile, got %v", err)
+	}
+}
