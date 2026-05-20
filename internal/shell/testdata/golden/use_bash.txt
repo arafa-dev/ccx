@@ -1,0 +1,2 @@
+export CLAUDE_CONFIG_DIR='/Users/arafa/.claude-profiles/work'
+export CCX_ACTIVE_PROFILE='work'

@@ -1,0 +1,7 @@
+function ccx
+    if test "$argv[1]" = use
+        command ccx use $argv[2..] | source
+    else
+        command ccx $argv
+    end
+end

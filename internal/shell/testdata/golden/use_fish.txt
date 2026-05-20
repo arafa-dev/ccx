@@ -1,0 +1,2 @@
+set -gx CLAUDE_CONFIG_DIR '/Users/arafa/.claude-profiles/work'
+set -gx CCX_ACTIVE_PROFILE 'work'
