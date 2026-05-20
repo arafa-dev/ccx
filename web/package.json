@@ -14,7 +14,8 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "e2e:install": "playwright install --with-deps chromium",
-    "gen:api": "openapi-typescript ../api/openapi.yaml -o ./lib/api-types.ts"
+    "gen:api": "openapi-typescript ../api/openapi.yaml -o ./lib/api-types.ts",
+    "check:api-types": "bash scripts/check-api-types.sh"
   },
   "dependencies": {
     "next": "15.0.3",
