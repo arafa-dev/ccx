@@ -1,0 +1,8 @@
+{"type":"user","uuid":"01H7Z8BBBA","sessionId":"sess-002","timestamp":"2026-05-19T12:00:00Z"}
+this line is not valid json at all
+{"type":"unknown-future-event","uuid":"01H7Z8BBBB","sessionId":"sess-002","timestamp":"2026-05-19T12:00:01Z"}
+
+{"type":"assistant","uuid":"01H7Z8BBBC","sessionId":"sess-002","timestamp":"2026-05-19T12:00:02Z","message":{"model":"claude-opus-4-7","usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"type":"user","uuid":"","sessionId":"sess-002","timestamp":"2026-05-19T12:00:03Z"}
+{"type":"user","uuid":"01H7Z8BBBD","sessionId":"sess-002","timestamp":"not-a-timestamp"}
+{"type":"user","uuid":"01H7Z8BBBE","sessionId":"sess-002","timestamp":"2026-05-19T12:00:05Z"}
