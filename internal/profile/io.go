@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 )
 
 // tmpSuffix is the suffix used by atomic writes. The temp file is renamed
@@ -48,13 +50,56 @@ func atomicWriteRegistry(path string, r registry) error {
 	}
 
 	tmp := path + tmpSuffix
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	// The path is the manager-owned registry temp file, not user shell input.
+	//nolint:gosec // G304: registry path is controlled by Manager construction.
+	tmpFile, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("opening tmp registry: %w", err)
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmp)
 		return fmt.Errorf("writing tmp registry: %w", err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("syncing tmp registry: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("closing tmp registry: %w", err)
 	}
 
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("renaming tmp registry: %w", err)
 	}
+	if err := syncParentDir(path); err != nil {
+		return fmt.Errorf("syncing registry dir: %w", err)
+	}
 	return nil
+}
+
+func syncParentDir(path string) error {
+	// The path is the manager-owned registry directory, not user shell input.
+	//nolint:gosec // G304: registry path is controlled by Manager construction.
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	if syncErr != nil && !isIgnorableDirSyncError(syncErr) {
+		return syncErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return nil
+}
+
+func isIgnorableDirSyncError(err error) bool {
+	return errors.Is(err, syscall.EINVAL) || runtime.GOOS == "windows"
 }

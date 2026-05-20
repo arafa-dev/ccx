@@ -1,9 +1,11 @@
 package profile
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,5 +100,61 @@ func TestAtomicWriteOverwrites(t *testing.T) {
 	}
 	if len(r.Profiles) != 1 || r.Profiles[0].Name != "b" {
 		t.Errorf("expected single profile b after overwrite, got %+v", r.Profiles)
+	}
+}
+
+func TestAtomicWriteSyncsToDisk(t *testing.T) {
+	source, err := os.ReadFile("io.go")
+	if err != nil {
+		t.Fatalf("read io.go: %v", err)
+	}
+	requireOrderedSource(
+		t, string(source),
+		"os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)",
+		".Write(data)",
+		".Sync()",
+		".Close()",
+		"os.Rename(tmp, path)",
+		"syncParentDir(path)",
+	)
+
+	root := filepath.Join(t.TempDir(), "ccx-home")
+	path := filepath.Join(root, "profiles.toml")
+	r := registry{Profiles: []contracts.Profile{{Name: "work", ConfigDir: "/x/work"}}}
+	if err := atomicWriteRegistry(path, r); err != nil {
+		t.Fatalf("atomicWriteRegistry: %v", err)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("successful atomic write left tmp file, err=%v", err)
+	}
+
+	mgr, err := NewManager(filepath.Join(t.TempDir(), "manager-root"))
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	ctx := context.Background()
+	if err := mgr.Add(ctx, contracts.Profile{Name: "first", ConfigDir: filepath.Join(t.TempDir(), "first")}); err != nil {
+		t.Fatalf("Add first: %v", err)
+	}
+	if _, err := os.Stat(mgr.Path() + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("first Add left tmp file, err=%v", err)
+	}
+	if err := mgr.Add(ctx, contracts.Profile{Name: "second", ConfigDir: filepath.Join(t.TempDir(), "second")}); err != nil {
+		t.Fatalf("Add second: %v", err)
+	}
+	if _, err := os.Stat(mgr.Path() + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("second Add left tmp file, err=%v", err)
+	}
+}
+
+func requireOrderedSource(t *testing.T, source string, tokens ...string) {
+	t.Helper()
+	offset := 0
+	for _, token := range tokens {
+		idx := strings.Index(source[offset:], token)
+		if idx < 0 {
+			t.Fatalf("source does not contain %q after byte offset %d", token, offset)
+		}
+		offset += idx + len(token)
 	}
 }
