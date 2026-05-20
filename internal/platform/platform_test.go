@@ -57,3 +57,55 @@ func TestExpandPathEmptyInputErrors(t *testing.T) {
 		t.Errorf("error %q should mention empty input", err.Error())
 	}
 }
+
+func TestCCXHomeCreatesDirIfMissing(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	got, err := platform.CCXHome()
+	if err != nil {
+		t.Fatalf("CCXHome: %v", err)
+	}
+
+	want := filepath.Join(tmp, ".ccx")
+	if got != want {
+		t.Errorf("CCXHome = %q, want %q", got, want)
+	}
+
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("stat %q: %v", got, err)
+	}
+	if !info.IsDir() {
+		t.Errorf("CCXHome %q is not a directory", got)
+	}
+	// Permissions check is Unix-only; Windows uses ACLs and reports 0777-ish.
+	if runtimeIsUnix() {
+		if perm := info.Mode().Perm(); perm != 0o700 {
+			t.Errorf("CCXHome perm = %o, want 0700", perm)
+		}
+	}
+}
+
+func TestCCXHomeIdempotent(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	first, err := platform.CCXHome()
+	if err != nil {
+		t.Fatalf("first CCXHome: %v", err)
+	}
+	second, err := platform.CCXHome()
+	if err != nil {
+		t.Fatalf("second CCXHome: %v", err)
+	}
+	if first != second {
+		t.Errorf("CCXHome not idempotent: %q vs %q", first, second)
+	}
+}
+
+func runtimeIsUnix() bool {
+	return os.PathSeparator == '/'
+}
