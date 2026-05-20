@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 
 const ENABLED = process.env.NODE_ENV === 'development';
 
-export function MswBoot() {
+export function MswBoot({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(!ENABLED);
 
   useEffect(() => {
@@ -24,5 +25,5 @@ export function MswBoot() {
   }, []);
 
   if (!ready) return null;
-  return null;
+  return <>{children}</>;
 }

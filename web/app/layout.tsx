@@ -30,8 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="min-h-screen bg-background text-foreground antialiased">
         <ThemeProvider>
-          <MswBoot />
-          {children}
+          <MswBoot>{children}</MswBoot>
         </ThemeProvider>
       </body>
     </html>
