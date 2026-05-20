@@ -23,3 +23,11 @@ pnpm gen:api
 ```
 
 CI fails if the committed `lib/api-types.ts` is out of date.
+
+## Performance baseline (Lighthouse, mobile config)
+
+| Run | Performance | Accessibility | Best Practices | SEO |
+|---|---|---|---|---|
+| Initial baseline | 93 | 100 | 96 | 100 |
+
+Re-run after any major UI change. Performance must stay >= 90, Accessibility >= 95.
