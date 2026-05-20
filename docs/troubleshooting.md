@@ -19,13 +19,16 @@ source ~/.zshrc
 
 ## After switching, `claude` still uses the old account (macOS)
 
-Claude Code derives its Keychain service name from `CLAUDE_CONFIG_DIR` via SHA256. If you switched but `claude` still asks you to log in, run:
+Claude Code derives its Keychain service name from `CLAUDE_CONFIG_DIR` via
+SHA256. If you switched but `claude` still asks you to log in, run:
 
 ```bash
 ccx doctor
 ```
 
-It will report which profile the env says is active and whether a matching Keychain entry exists. If the Keychain entry is missing for the active profile, run `claude /login` once to create it.
+It will report which profile the env says is active and whether a matching
+Keychain entry exists. If the Keychain entry is missing for the active profile,
+run `claude /login` once to create it.
 
 ## `ccx dashboard` says port already in use
 
@@ -59,7 +62,9 @@ If all of those look fine, run `ccx usage --verbose` and file an issue with the 
 
 ## Cost numbers look wrong
 
-ccx ships an embedded pricing table that's accurate as of the version's release date. If Anthropic changes prices, your numbers will drift until ccx ships an updated table.
+ccx ships an embedded pricing table that's accurate as of the version's release
+date. If Anthropic changes prices, your numbers will drift until ccx ships an
+updated table.
 
 To override:
 

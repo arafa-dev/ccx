@@ -55,13 +55,20 @@ ccx dashboard
 
 ## Why ccx?
 
-If you run more than one Claude Code account — Pro plus Max, work plus personal, multiple Pro accounts on a shared machine — you've probably ended up with a directory of shell aliases that hot-swap `~/.claude`, plus `ccusage` open in another tab for analytics. Two tools to do one job.
+If you run more than one Claude Code account — Pro plus Max, work plus personal,
+multiple Pro accounts on a shared machine — you've probably ended up with a
+directory of shell aliases that hot-swap `~/.claude`, plus `ccusage` open in
+another tab for analytics. Two tools to do one job.
 
-ccx is the one tool. It switches accounts (the part `ccusage` doesn't do) and tracks usage (the part the bash-alias scripts don't do), all from a single Go binary.
+ccx is the one tool. It switches accounts (the part `ccusage` doesn't do) and
+tracks usage (the part the bash-alias scripts don't do), all from a single Go
+binary.
 
 ## How it works
 
-ccx never proxies API calls. The upstream `claude` CLI does what it always did — ccx just chooses *which* config dir and *which* keychain entry `claude` reads from, by exporting `CLAUDE_CONFIG_DIR` in your shell.
+ccx never proxies API calls. The upstream `claude` CLI does what it always did —
+ccx just chooses *which* config dir and *which* keychain entry `claude` reads
+from, by exporting `CLAUDE_CONFIG_DIR` in your shell.
 
 ![architecture diagram](docs/assets/architecture.png)
 
@@ -69,8 +76,8 @@ For details, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Comparison
 
-|  | **ccx** | ccusage | claude-account-switcher | ccs |
-|---|---|---|---|---|
+| Capability | **ccx** | ccusage | claude-account-switcher | ccs |
+| --- | --- | --- | --- | --- |
 | Profile switching | ✅ | ❌ | ✅ (bash only) | ✅ |
 | Usage analytics | ✅ | ✅ (deepest) | ❌ | partial |
 | Local dashboard | ✅ | ❌ | ❌ | ❌ |
@@ -78,7 +85,9 @@ For details, see [`docs/architecture.md`](docs/architecture.md).
 | Cross-platform | macOS · Linux · Windows | ✅ | macOS-focused | ✅ |
 | Distribution | brew · scoop · apt · curl\|sh | npm | manual | GitHub Releases |
 
-Be honest: `ccusage` has deeper analytics than ccx (per-message drilldowns, custom date ranges). If analytics is your only need, use ccusage. If you also juggle accounts, ccx replaces both.
+Be honest: `ccusage` has deeper analytics than ccx (per-message drilldowns,
+custom date ranges). If analytics is your only need, use ccusage. If you also
+juggle accounts, ccx replaces both.
 
 ## Configuration
 
@@ -88,7 +97,10 @@ ccx state lives in `~/.ccx/`:
 - `~/.ccx/state.db` — SQLite cache of parsed events
 - `~/.ccx/pricing.yaml` — optional override for the embedded model pricing table
 
-Profile config dirs live wherever you put them (commonly `~/.claude-profiles/<name>`). On macOS the credential lives in Keychain under a service name derived from the config dir path — ccx does not touch your credentials directly.
+Profile config dirs live wherever you put them (commonly
+`~/.claude-profiles/<name>`). On macOS the credential lives in Keychain under a
+service name derived from the config dir path — ccx does not touch your
+credentials directly.
 
 See [`docs/installation.md`](docs/installation.md) for per-platform setup details.
 
@@ -103,7 +115,9 @@ Planned, not promised:
 
 ## Contributing
 
-Issues, bug reports, and PRs welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/conventions.md`](docs/conventions.md) before opening a PR.
+Issues, bug reports, and PRs welcome. Please read
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and
+[`docs/conventions.md`](docs/conventions.md) before opening a PR.
 
 ## License
 

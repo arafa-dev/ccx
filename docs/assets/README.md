@@ -35,11 +35,14 @@ Three lanes, left-to-right:
 - PNG: 2400×1350 (2x retina), white background
 - SVG: same dimensions, transparent background
 
-After exporting, place both at `docs/assets/architecture.png` and `docs/assets/architecture.svg`. README references the PNG.
+After exporting, place both at `docs/assets/architecture.png` and
+`docs/assets/architecture.svg`. README references the PNG.
 
 ## `dashboard.png`
 
-Screenshot of the dashboard in dark mode, taken from a 1440×900 viewport with realistic data. Captured during Phase 3 (Polish) after the dashboard is functional.
+Screenshot of the dashboard in dark mode, taken from a 1440×900 viewport with
+realistic data. Captured during Phase 3 (Polish) after the dashboard is
+functional.
 
 ## `demo.gif`
 

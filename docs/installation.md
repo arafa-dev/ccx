@@ -36,7 +36,8 @@ sudo rpm -i https://github.com/arafa-dev/ccx/releases/latest/download/ccx_linux_
 curl -fsSL https://raw.githubusercontent.com/arafa-dev/ccx/main/install.sh | sh
 ```
 
-The script picks the right binary for your OS and arch, verifies its SHA256, and installs it to `/usr/local/bin/ccx` (or `~/.local/bin/ccx` if not root).
+The script picks the right binary for your OS and arch, verifies its SHA256, and
+installs it to `/usr/local/bin/ccx` (or `~/.local/bin/ccx` if not root).
 
 Then set up shell integration:
 
