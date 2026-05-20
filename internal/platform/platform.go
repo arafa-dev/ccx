@@ -86,3 +86,23 @@ func parseUnixShell(shellEnv string) contracts.Shell { //nolint:unused // used b
 		return contracts.ShellUnknown
 	}
 }
+
+// claudeConfigDirEnv is the env var Claude Code reads to override its config
+// directory. Documented at code.claude.com/docs/en/env-vars.
+const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
+
+// DefaultConfigDir returns the platform-default Claude Code config directory.
+//
+//	macOS:   $HOME/.claude (or $HOME/.config/claude if that exists)
+//	Linux:   $HOME/.claude (or $HOME/.config/claude if that exists)
+//	Windows: %USERPROFILE%\.claude
+//
+// If CLAUDE_CONFIG_DIR is set in the environment, its value (after path
+// expansion) is returned instead. The returned path is absolute but may not
+// yet exist on disk.
+func DefaultConfigDir() (string, error) {
+	if override := os.Getenv(claudeConfigDirEnv); override != "" {
+		return ExpandPath(override)
+	}
+	return defaultConfigDirOS()
+}
