@@ -93,10 +93,6 @@ func newVersionCommand(opts *Options) *cobra.Command {
 	}
 }
 
-func newUsageCommand(_ *Options) *cobra.Command {
-	return &cobra.Command{Use: "usage", Short: "Show token usage", RunE: notImpl("usage")}
-}
-
 func newDashboardCommand(_ *Options) *cobra.Command {
 	return &cobra.Command{Use: "dashboard", Short: "Open local dashboard", RunE: notImpl("dashboard")}
 }
