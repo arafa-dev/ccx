@@ -5,6 +5,7 @@ import (
 
 	"github.com/arafa-dev/ccx/internal/contracts"
 	"github.com/arafa-dev/ccx/internal/platform"
+	"github.com/arafa-dev/ccx/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +42,7 @@ If <name> is omitted, opens an interactive picker.`,
 				if len(profiles) == 0 {
 					return fmt.Errorf("no profiles registered; run `ccx profile add` first")
 				}
-				p, err = pickProfileFallback(profiles)
+				p, err = tui.PickProfile(profiles)
 				if err != nil {
 					return err
 				}
@@ -68,8 +69,4 @@ If <name> is omitted, opens an interactive picker.`,
 	}
 	cmd.Flags().StringVar(&shellOverride, "shell", "", "force shell flavor (zsh|bash|fish|pwsh); default: auto-detect")
 	return cmd
-}
-
-func pickProfileFallback(profiles []contracts.Profile) (contracts.Profile, error) {
-	return profiles[0], nil
 }
