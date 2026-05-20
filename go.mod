@@ -15,4 +15,6 @@ require (
 	modernc.org/libc v1.61.13 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.8.2 // indirect
+  github.com/pelletier/go-toml/v2 v2.3.1
 )
+
