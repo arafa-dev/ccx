@@ -74,11 +74,11 @@ func parseUnixShell(shellEnv string) contracts.Shell {
 		return contracts.ShellUnknown
 	}
 	switch strings.ToLower(filepath.Base(shellEnv)) {
-	case "zsh", "-zsh":
+	case "zsh", "-zsh", "zsh.exe":
 		return contracts.ShellZsh
-	case "bash", "-bash":
+	case "bash", "-bash", "bash.exe":
 		return contracts.ShellBash
-	case "fish", "-fish":
+	case "fish", "-fish", "fish.exe":
 		return contracts.ShellFish
 	case "pwsh", "powershell", "powershell.exe", "pwsh.exe":
 		return contracts.ShellPowerShell
