@@ -29,6 +29,22 @@ if (typeof window !== 'undefined' && !('ResizeObserver' in window)) {
     } as unknown as typeof ResizeObserver;
 }
 
+if (typeof HTMLElement !== 'undefined') {
+  HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    return {
+      x: 0,
+      y: 0,
+      width: 320,
+      height: 160,
+      top: 0,
+      right: 320,
+      bottom: 160,
+      left: 0,
+      toJSON: () => {},
+    };
+  };
+}
+
 afterEach(() => {
   cleanup();
 });
