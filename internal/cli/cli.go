@@ -97,10 +97,6 @@ func newDashboardCommand(_ *Options) *cobra.Command {
 	return &cobra.Command{Use: "dashboard", Short: "Open local dashboard", RunE: notImpl("dashboard")}
 }
 
-func newDoctorCommand(_ *Options) *cobra.Command {
-	return &cobra.Command{Use: "doctor", Short: "Diagnose your install", RunE: notImpl("doctor")}
-}
-
 func notImpl(name string) func(*cobra.Command, []string) error {
 	return func(*cobra.Command, []string) error {
 		return fmt.Errorf("%s: not implemented yet", name)
