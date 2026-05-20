@@ -69,7 +69,7 @@ func CCXHome() (string, error) {
 // parseUnixShell maps the basename of a $SHELL value to a contracts.Shell.
 // Exposed as an unexported helper so platform_unix.go (darwin+linux) and the
 // table-driven tests can share the mapping.
-func parseUnixShell(shellEnv string) contracts.Shell { //nolint:unused // used after public wrappers are added in the next task
+func parseUnixShell(shellEnv string) contracts.Shell {
 	if shellEnv == "" {
 		return contracts.ShellUnknown
 	}
@@ -105,4 +105,26 @@ func DefaultConfigDir() (string, error) {
 		return ExpandPath(override)
 	}
 	return defaultConfigDirOS()
+}
+
+// DetectShell returns the user's current shell, inferring from $SHELL on Unix
+// and from $PSModulePath (or parent shell hints) on Windows. Returns
+// contracts.ShellUnknown when it cannot decide.
+func DetectShell() contracts.Shell {
+	return detectShellOS()
+}
+
+// CredentialsPath returns the credentials file path for the given Claude Code
+// config directory. On macOS the credentials live in the Keychain and this
+// function returns ("", ErrCredentialsInKeychain); callers should detect that
+// with errors.Is.
+func CredentialsPath(configDir string) (string, error) {
+	return credentialsPathOS(configDir)
+}
+
+// IsCredentialsInKeychain reports whether the current OS stores Claude Code
+// credentials in the system keychain (true on darwin) rather than on disk
+// (false on linux/windows).
+func IsCredentialsInKeychain() bool {
+	return isCredentialsInKeychainOS()
 }

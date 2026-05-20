@@ -22,17 +22,17 @@ func defaultConfigDirOS() (string, error) {
 	return filepath.Join(home, ".claude"), nil
 }
 
-func detectShellOS() contracts.Shell { //nolint:unused // used after public wrappers are added in the next task
+func detectShellOS() contracts.Shell {
 	return parseUnixShell(os.Getenv("SHELL"))
 }
 
-func credentialsPathOS(configDir string) (string, error) { //nolint:unused // used after public wrappers are added in the next task
+func credentialsPathOS(configDir string) (string, error) {
 	if configDir == "" {
 		return "", fmt.Errorf("credentials path: config dir is empty")
 	}
 	return filepath.Join(configDir, ".credentials.json"), nil
 }
 
-func isCredentialsInKeychainOS() bool { //nolint:unused // used after public wrappers are added in the next task
+func isCredentialsInKeychainOS() bool {
 	return false
 }

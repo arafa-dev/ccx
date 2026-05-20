@@ -22,14 +22,14 @@ func defaultConfigDirOS() (string, error) {
 	return filepath.Join(home, ".claude"), nil
 }
 
-func detectShellOS() contracts.Shell { //nolint:unused // used after public wrappers are added in the next task
+func detectShellOS() contracts.Shell {
 	return parseUnixShell(os.Getenv("SHELL"))
 }
 
-func credentialsPathOS(_ string) (string, error) { //nolint:unused // used after public wrappers are added in the next task
+func credentialsPathOS(_ string) (string, error) {
 	return "", ErrCredentialsInKeychain
 }
 
-func isCredentialsInKeychainOS() bool { //nolint:unused // used after public wrappers are added in the next task
+func isCredentialsInKeychainOS() bool {
 	return true
 }
