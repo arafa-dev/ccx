@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Anthropic Claude Code bugs
+    url: https://github.com/anthropics/claude-code/issues
+    about: Bugs in the upstream `claude` CLI go here, not to ccx.
+  - name: GitHub Discussions
+    url: https://github.com/arafa-dev/ccx/discussions
+    about: For questions, ideas, and general discussion (not bugs).
