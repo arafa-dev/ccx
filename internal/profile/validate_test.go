@@ -67,7 +67,7 @@ func TestValidateProfileNameRegex(t *testing.T) {
 		}
 	}
 
-	p := contracts.Profile{Name: "123-ok", ConfigDir: "/abs/x"}
+	p := contracts.Profile{Name: "123-ok", ConfigDir: filepath.Join(t.TempDir(), "x")}
 	if err := profile.ValidateProfile(p); err != nil {
 		t.Fatalf("expected valid name, got %v", err)
 	}
