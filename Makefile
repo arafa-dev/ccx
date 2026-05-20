@@ -1,4 +1,4 @@
-.PHONY: help build test lint fmt clean web dev release ci all
+.PHONY: help build test lint fmt clean web stage-web dev release ci all
 
 # Default goal
 .DEFAULT_GOAL := help
@@ -11,7 +11,13 @@ LDFLAGS     := -s -w -X main.version=$(shell git describe --tags --always --dirt
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-build: ## Build the ccx binary
+stage-web: ## Stage web/out into internal/dashboard for go:embed
+	rm -rf internal/dashboard/web-out
+	mkdir -p internal/dashboard/web-out
+	cp -R web/out/. internal/dashboard/web-out/
+	touch internal/dashboard/web-out/.gitkeep
+
+build: stage-web ## Build the ccx binary
 	@mkdir -p dist
 	go build -trimpath -ldflags="$(LDFLAGS)" -o dist/$(BINARY) ./cmd/ccx
 
