@@ -93,10 +93,6 @@ func newVersionCommand(opts *Options) *cobra.Command {
 	}
 }
 
-func newInitCommand(_ *Options) *cobra.Command {
-	return &cobra.Command{Use: "init", Short: "Print shell rc snippet", RunE: notImpl("init")}
-}
-
 func newUsageCommand(_ *Options) *cobra.Command {
 	return &cobra.Command{Use: "usage", Short: "Show token usage", RunE: notImpl("usage")}
 }
