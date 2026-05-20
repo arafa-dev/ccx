@@ -13,6 +13,15 @@ pnpm test         # vitest
 pnpm e2e          # playwright (run `pnpm e2e:install` once first)
 ```
 
+`pnpm dev` regenerates `public/mockServiceWorker.js` locally before starting
+Next.js. The worker file is intentionally ignored and should not be committed or
+served from the production static export.
+
+Production builds use `next/font/google`, so `pnpm build` needs network access
+to fetch Google font metadata/assets at build time. GitHub-hosted release
+runners have this access; an air-gapped CI should switch to vendored local fonts
+before enforcing offline builds.
+
 ## Regenerating API types
 
 `lib/api-types.ts` is generated from `../api/openapi.yaml`. Regenerate after any

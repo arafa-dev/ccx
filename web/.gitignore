@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /out/
+/public/mockServiceWorker.js
 
 # production
 /build

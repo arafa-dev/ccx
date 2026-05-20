@@ -5,6 +5,8 @@
   "type": "module",
   "packageManager": "pnpm@10.26.2",
   "scripts": {
+    "predev": "pnpm msw init public/ --no-save",
+    "msw": "msw",
     "dev": "next dev -p 3001 --turbopack",
     "build": "next build",
     "start": "next start -p 3001",
