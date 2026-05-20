@@ -109,3 +109,58 @@ func TestCCXHomeIdempotent(t *testing.T) {
 func runtimeIsUnix() bool {
 	return os.PathSeparator == '/'
 }
+
+func TestDefaultConfigDirReturnsAbsolutePath(t *testing.T) {
+	// Clear the override so we exercise the OS default branch.
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	got, err := platform.DefaultConfigDir()
+	if err != nil {
+		t.Fatalf("DefaultConfigDir: %v", err)
+	}
+	if got == "" {
+		t.Fatal("DefaultConfigDir returned empty")
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("DefaultConfigDir = %q is not absolute", got)
+	}
+	// It should be located under the (fake) home.
+	if !strings.HasPrefix(got, tmp) {
+		t.Errorf("DefaultConfigDir = %q should be under HOME %q", got, tmp)
+	}
+}
+
+func TestDefaultConfigDirRespectsEnvOverride(t *testing.T) {
+	tmp := t.TempDir()
+	override := filepath.Join(tmp, "custom-claude")
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("CLAUDE_CONFIG_DIR", override)
+
+	got, err := platform.DefaultConfigDir()
+	if err != nil {
+		t.Fatalf("DefaultConfigDir: %v", err)
+	}
+	if got != override {
+		t.Errorf("DefaultConfigDir = %q, want override %q", got, override)
+	}
+}
+
+func TestDefaultConfigDirExpandsTildeInOverride(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("CLAUDE_CONFIG_DIR", "~/elsewhere")
+
+	got, err := platform.DefaultConfigDir()
+	if err != nil {
+		t.Fatalf("DefaultConfigDir: %v", err)
+	}
+	want := filepath.Join(tmp, "elsewhere")
+	if got != want {
+		t.Errorf("DefaultConfigDir = %q, want %q", got, want)
+	}
+}
