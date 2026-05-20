@@ -1,0 +1,2 @@
+$env:CLAUDE_CONFIG_DIR = '/Users/arafa/.claude-profiles/work'
+$env:CCX_ACTIVE_PROFILE = 'work'

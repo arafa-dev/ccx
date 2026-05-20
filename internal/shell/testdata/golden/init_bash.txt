@@ -1,0 +1,7 @@
+ccx() {
+  if [[ "$1" == "use" ]]; then
+    eval "$(command ccx use "${@:2}")"
+  else
+    command ccx "$@"
+  fi
+}
