@@ -104,6 +104,18 @@ func TestProjectNameFromDirURLDecoded(t *testing.T) {
 	if got != "home/user/proj" {
 		t.Errorf("projectNameFromDir(encoded) = %q want decoded", got)
 	}
+	got = projectNameFromDir("my+project")
+	if got != "my+project" {
+		t.Errorf("projectNameFromDir(literal plus) = %q want plus preserved", got)
+	}
+	got = projectNameFromDir("C%2B%2B")
+	if got != "C++" {
+		t.Errorf("projectNameFromDir(encoded plus) = %q want decoded pluses", got)
+	}
+	got = projectNameFromDir("space%20here")
+	if got != "space here" {
+		t.Errorf("projectNameFromDir(encoded space) = %q want decoded space", got)
+	}
 	got = projectNameFromDir("bad%ZZencoding")
 	if got != "bad%ZZencoding" {
 		t.Errorf("projectNameFromDir(bad encoding) = %q want raw fallback", got)

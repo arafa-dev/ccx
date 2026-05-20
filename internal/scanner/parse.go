@@ -77,10 +77,10 @@ func parseLine(b []byte, project string) (contracts.Event, bool) {
 }
 
 // projectNameFromDir returns the human-readable project name for the given
-// directory basename. Claude Code stores project directories with URL-encoded
+// directory basename. Claude Code stores project directories with path-escaped
 // paths; if decoding fails, the raw name is returned unchanged.
 func projectNameFromDir(base string) string {
-	decoded, err := url.QueryUnescape(base)
+	decoded, err := url.PathUnescape(base)
 	if err != nil {
 		return base
 	}
