@@ -35,6 +35,17 @@ ccx tries ports 7777–7787 in order. If all are taken (unlikely):
 ccx dashboard --port 8888
 ```
 
+## PowerShell blocks `ccx init pwsh`
+
+Windows may block profile scripts on default PowerShell execution-policy settings. If `ccx init pwsh` output is
+added to your `$PROFILE` but PowerShell refuses to run it, allow locally created scripts for your user:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Restart PowerShell, then run `ccx init pwsh | Out-String | Invoke-Expression` again.
+
 ## `ccx usage` shows $0 even though I've used Claude
 
 Check:
