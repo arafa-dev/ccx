@@ -299,3 +299,19 @@ func TestUserOverrideReplacesExistingModel(t *testing.T) {
 		t.Errorf("untouched sonnet = %.6f, want 3.00", gotSonnet)
 	}
 }
+
+func TestUserOverrideMalformedYAMLReturnsError(t *testing.T) {
+	bad := []byte("models: [this is not valid yaml: : :\n")
+	_, err := pricing.NewTableFromBytes([]byte(twoModelYAML), bad)
+	if err == nil {
+		t.Fatalf("expected error on malformed user override, got nil")
+	}
+}
+
+func TestEmbeddedMalformedYAMLReturnsError(t *testing.T) {
+	bad := []byte("models: [this is not valid yaml: : :\n")
+	_, err := pricing.NewTableFromBytes(bad, nil)
+	if err == nil {
+		t.Fatalf("expected error on malformed embedded YAML, got nil")
+	}
+}
