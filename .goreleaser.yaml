@@ -1,0 +1,217 @@
+# .goreleaser.yaml - ccx v0.1
+# Docs: https://goreleaser.com/customization/
+version: 2
+
+project_name: ccx
+
+# Build hook: the Go binary embeds web/out/ via go:embed. We MUST build the
+# Next.js dashboard before goreleaser invokes `go build`. We also tidy go.sum
+# to fail fast on dependency drift.
+before:
+  hooks:
+    - go mod tidy
+    - sh -c 'if [ -d web ] && [ -f web/package.json ]; then pnpm --filter web install --frozen-lockfile && pnpm --filter web build; else echo "web/ not present, skipping (Phase 1 A7 will add it)"; fi'
+
+builds:
+  - id: ccx
+    main: ./cmd/ccx
+    binary: ccx
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # No exclusions: all six (3 OS x 2 arch) combinations are released.
+
+archives:
+  - id: default
+    ids:
+      - ccx
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}darwin{{ end }}
+      {{- if eq .Os "linux"  }}linux{{ end }}
+      {{- if eq .Os "windows"}}windows{{ end }}_
+      {{- if eq .Arch "amd64" }}amd64{{ end }}
+      {{- if eq .Arch "arm64" }}arm64{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+    formats: ["tar.gz"]
+    files:
+      - LICENSE
+      - README.md
+      - SECURITY.md
+
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+  format: tar.gz
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "0.0.1-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+
+nfpms:
+  - id: ccx-pkg
+    package_name: ccx
+    ids:
+      - ccx
+    vendor: arafa-dev
+    homepage: https://github.com/arafa-dev/ccx
+    maintainer: arafa-dev <noreply@arafa-dev.com>
+    description: |-
+      Multi-account workspace manager for Claude Code.
+      Switch between accounts and view real usage across all of them
+      from a single Go binary.
+    license: MIT
+    section: utils
+    priority: optional
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/ccx/LICENSE
+      - src: README.md
+        dst: /usr/share/doc/ccx/README.md
+    overrides:
+      deb:
+        dependencies: []
+      rpm:
+        dependencies: []
+    rpm:
+      group: Applications/System
+      compression: xz
+    deb:
+      compression: xz
+
+brews:
+  - name: ccx
+    ids:
+      - default
+    repository:
+      owner: arafa-dev
+      name: homebrew-ccx
+      branch: main
+      token: "{{ .Env.GH_PAT }}"
+    directory: Formula
+    homepage: https://github.com/arafa-dev/ccx
+    description: Multi-account workspace manager for Claude Code
+    license: MIT
+    test: |
+      system "#{bin}/ccx", "version"
+    install: |
+      bin.install "ccx"
+    commit_author:
+      name: ccx-release-bot
+      email: noreply@arafa-dev.com
+    commit_msg_template: "chore(formula): bump ccx to {{ .Tag }}"
+
+scoops:
+  - name: ccx
+    ids:
+      - default
+    repository:
+      owner: arafa-dev
+      name: scoop-ccx
+      branch: main
+      token: "{{ .Env.GH_PAT }}"
+    homepage: https://github.com/arafa-dev/ccx
+    description: Multi-account workspace manager for Claude Code
+    license: MIT
+    commit_author:
+      name: ccx-release-bot
+      email: noreply@arafa-dev.com
+    commit_msg_template: "chore(manifest): bump ccx to {{ .Tag }}"
+
+signs:
+  - id: cosign
+    cmd: cosign
+    artifacts: checksum
+    stdin: "{{ .Env.COSIGN_PASSWORD }}"
+    args:
+      - sign-blob
+      - "--key=env://COSIGN_PRIVATE_KEY"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+
+release:
+  github:
+    owner: arafa-dev
+    name: ccx
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## ccx {{ .Tag }}
+
+    Multi-account workspace manager for Claude Code.
+
+    ### Install
+
+    ```bash
+    # Homebrew (macOS / Linux)
+    brew install arafa-dev/ccx/ccx
+
+    # Scoop (Windows)
+    scoop bucket add ccx https://github.com/arafa-dev/scoop-ccx
+    scoop install ccx
+
+    # Debian / Ubuntu
+    curl -fsSLO https://github.com/arafa-dev/ccx/releases/download/{{ .Tag }}/ccx_{{ .Version }}_linux_amd64.deb
+    sudo dpkg -i ccx_{{ .Version }}_linux_amd64.deb
+
+    # Fedora / RHEL
+    curl -fsSLO https://github.com/arafa-dev/ccx/releases/download/{{ .Tag }}/ccx_{{ .Version }}_linux_amd64.rpm
+    sudo rpm -i ccx_{{ .Version }}_linux_amd64.rpm
+
+    # One-liner installer (any POSIX)
+    curl -fsSL https://raw.githubusercontent.com/arafa-dev/ccx/main/install.sh | sh
+
+    # go install
+    go install github.com/arafa-dev/ccx/cmd/ccx@{{ .Tag }}
+    ```
+  footer: |
+    ---
+    All binaries are signed with cosign. Verify with:
+    ```
+    cosign verify-blob --key https://github.com/arafa-dev/ccx/releases/download/{{ .Tag }}/cosign.pub --signature checksums.txt.sig checksums.txt
+    ```

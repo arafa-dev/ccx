@@ -1,0 +1,60 @@
+{
+  "name": "@ccx/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.26.2",
+  "scripts": {
+    "predev": "pnpm msw init public/ --no-save",
+    "msw": "msw",
+    "dev": "next dev -p 3001 --turbopack",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "preview": "pnpm build && npx serve out -p 3002",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install --with-deps chromium",
+    "gen:api": "openapi-typescript ../api/openapi.yaml -o ./lib/api-types.ts",
+    "check:api-types": "bash scripts/check-api-types.sh"
+  },
+  "dependencies": {
+    "next": "15.0.3",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "recharts": "2.13.3",
+    "next-themes": "0.4.3",
+    "lucide-react": "0.460.0",
+    "class-variance-authority": "0.7.0",
+    "clsx": "2.1.1",
+    "tailwind-merge": "2.5.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.48.2",
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.0.1",
+    "@testing-library/user-event": "14.5.2",
+    "@types/node": "22.9.0",
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "@vitejs/plugin-react": "4.3.3",
+    "autoprefixer": "10.4.20",
+    "eslint": "9.14.0",
+    "eslint-config-next": "15.0.3",
+    "jsdom": "25.0.1",
+    "msw": "2.6.4",
+    "openapi-typescript": "7.4.3",
+    "postcss": "8.4.49",
+    "tailwindcss": "3.4.14",
+    "typescript": "5.6.3",
+    "vitest": "2.1.5"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
+  }
+}
