@@ -2,8 +2,6 @@ module github.com/arafa-dev/ccx
 
 go 1.22
 
-require modernc.org/sqlite v1.35.0
-
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -16,5 +14,7 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.8.2 // indirect
   github.com/pelletier/go-toml/v2 v2.3.1
+  gopkg.in/yaml.v3 v3.0.1
+  modernc.org/sqlite v1.35.0
 )
 
