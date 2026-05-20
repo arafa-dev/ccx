@@ -1,4 +1,4 @@
-.PHONY: help build test lint fmt clean web stage-web dev release ci all
+.PHONY: help build test integration-test lint fmt clean web stage-web dev release ci all
 
 # Default goal
 .DEFAULT_GOAL := help
@@ -23,6 +23,9 @@ build: stage-web ## Build the ccx binary
 
 test: ## Run all Go tests
 	go test -race -count=1 $(GO_PACKAGES)
+
+integration-test: stage-web ## Run integration tests
+	go test -tags integration -count=1 ./integration_test/...
 
 lint: ## Run linters
 	golangci-lint run
