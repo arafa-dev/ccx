@@ -13,8 +13,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-22.04
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - "**/*.go"
+              - "go.mod"
+              - "go.sum"
+              - ".golangci.yml"
+              - ".github/workflows/ci.yml"
+              - "api/openapi.yaml"
+            web:
+              - "web/**"
+              - "api/openapi.yaml"
+              - ".github/workflows/ci.yml"
+
   lint:
     name: Lint
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
@@ -40,7 +66,8 @@ jobs:
 
   test:
     name: Test (${{ matrix.os }})
-    needs: lint
+    needs: [changes, lint]
+    if: needs.changes.outputs.go == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +84,8 @@ jobs:
 
   build:
     name: Build (${{ matrix.os }})
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.go == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -78,3 +106,31 @@ jobs:
             echo "cmd/ccx not present yet; skipping binary build"
           fi
         shell: bash
+
+  web:
+    name: Web (lint + test + build)
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm --filter web install --frozen-lockfile
+      - name: Check API types
+        run: pnpm --filter web exec bash scripts/check-api-types.sh
+      - name: Lint
+        run: pnpm --filter web lint
+      - name: Typecheck
+        run: pnpm --filter web typecheck
+      - name: Unit tests
+        run: pnpm --filter web test
+      - name: Build static export
+        run: pnpm --filter web build
