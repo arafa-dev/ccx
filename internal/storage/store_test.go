@@ -2,6 +2,7 @@ package storage_test
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/arafa-dev/ccx/internal/storage"
@@ -36,6 +37,25 @@ func TestNewStoreFileBacked(t *testing.T) {
 	}
 	if err := s.Close(); err != nil {
 		t.Errorf("Close: %v", err)
+	}
+}
+
+func TestNewStoreFileBackedAppliesPragmas(t *testing.T) {
+	ctx := context.Background()
+	s, err := storage.NewStore(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	if got := s.PragmaString(ctx, t, "journal_mode"); got != "wal" {
+		t.Errorf("PRAGMA journal_mode = %q, want wal", got)
+	}
+	if got := s.PragmaInt(ctx, t, "foreign_keys"); got != 1 {
+		t.Errorf("PRAGMA foreign_keys = %d, want 1", got)
+	}
+	if got := s.PragmaInt(ctx, t, "busy_timeout"); got != 5000 {
+		t.Errorf("PRAGMA busy_timeout = %d, want 5000", got)
 	}
 }
 

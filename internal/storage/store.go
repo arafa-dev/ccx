@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"sync"
 )
 
@@ -66,14 +65,10 @@ func buildDSN(dbPath string) string {
 	// In-memory databases must not be URL-encoded; they need the literal
 	// ":memory:" form. The modernc.org/sqlite driver accepts the raw form
 	// with query parameters appended.
-	q := url.Values{}
-	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "foreign_keys(on)")
-	q.Add("_pragma", "synchronous(NORMAL)")
-	q.Add("_pragma", "busy_timeout(5000)")
+	const pragmas = "_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
 
 	if dbPath == ":memory:" {
-		return ":memory:?" + q.Encode()
+		return ":memory:?" + pragmas
 	}
-	return "file:" + dbPath + "?" + q.Encode()
+	return "file:" + dbPath + "?" + pragmas
 }

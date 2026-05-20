@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -46,4 +47,24 @@ func (s *Store) CountEvents(ctx context.Context, t *testing.T, profileName strin
 		t.Fatalf("CountEvents: %v", err)
 	}
 	return n
+}
+
+// PragmaString reads a string-valued SQLite pragma. Test-only helper.
+func (s *Store) PragmaString(ctx context.Context, t *testing.T, name string) string {
+	t.Helper()
+	var got string
+	if err := s.db.QueryRowContext(ctx, fmt.Sprintf("PRAGMA %s", name)).Scan(&got); err != nil {
+		t.Fatalf("PragmaString(%s): %v", name, err)
+	}
+	return got
+}
+
+// PragmaInt reads an integer-valued SQLite pragma. Test-only helper.
+func (s *Store) PragmaInt(ctx context.Context, t *testing.T, name string) int {
+	t.Helper()
+	var got int
+	if err := s.db.QueryRowContext(ctx, fmt.Sprintf("PRAGMA %s", name)).Scan(&got); err != nil {
+		t.Fatalf("PragmaInt(%s): %v", name, err)
+	}
+	return got
 }
