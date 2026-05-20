@@ -1,0 +1,9 @@
+function ccx {
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
+    if ($Args.Count -gt 0 -and $Args[0] -eq 'use') {
+        $rest = $Args[1..($Args.Count - 1)]
+        & (Get-Command ccx.exe).Path use @rest | Out-String | Invoke-Expression
+    } else {
+        & (Get-Command ccx.exe).Path @Args
+    }
+}

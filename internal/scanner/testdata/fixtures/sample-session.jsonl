@@ -1,0 +1,5 @@
+{"type":"user","uuid":"01H7Z8AAAA","sessionId":"sess-001","timestamp":"2026-05-19T12:00:00Z","cwd":"/home/u/proj","message":{"content":[{"type":"text","text":"hi"}]}}
+{"type":"assistant","uuid":"01H7Z8AAAB","sessionId":"sess-001","timestamp":"2026-05-19T12:00:01Z","message":{"model":"claude-opus-4-7","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":10,"cache_read_input_tokens":200}}}
+{"type":"user","uuid":"01H7Z8AAAC","sessionId":"sess-001","timestamp":"2026-05-19T12:01:00Z","message":{"content":[{"type":"text","text":"more"}]}}
+{"type":"assistant","uuid":"01H7Z8AAAD","sessionId":"sess-001","timestamp":"2026-05-19T12:01:02Z","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":500}}}
+{"type":"tool_result","uuid":"01H7Z8AAAE","sessionId":"sess-001","timestamp":"2026-05-19T12:01:03Z"}
