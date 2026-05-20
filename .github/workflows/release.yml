@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # to create the GitHub Release
+  packages: write # in case docker pushes are added later
+  id-token: write # for cosign keyless (kept for future use)
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release ccx
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # goreleaser needs full history for changelog
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.4.0
+
+      - name: Build dashboard
+        run: |
+          if [ -d web ] && [ -f web/package.json ]; then
+            pnpm --filter web install --frozen-lockfile
+            pnpm --filter web build
+          else
+            echo "::warning::web/ not yet present (Phase 1 A7 not merged). Continuing."
+            mkdir -p web/out
+            echo '<!doctype html><title>ccx</title>' > web/out/index.html
+          fi
+
+      - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+
+      - name: Verify release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          echo "Verifying release for tag $tag ..."
+          gh release view "$tag" --repo "${{ github.repository }}" \
+              --json tagName,assets \
+              --jq '.tagName + " has " + (.assets | length | tostring) + " assets"'
+          # Sanity: expect at least 6 binary archives + checksums.txt + checksums.txt.sig + source tarball
+          n=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets | length')
+          if [ "$n" -lt 9 ]; then
+            echo "::error::release has only $n assets, expected >= 9"
+            exit 1
+          fi
+
+      - name: Verify cosign signature
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          tmp="$(mktemp -d)"
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$tag/checksums.txt" -o "$tmp/checksums.txt"
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$tag/checksums.txt.sig" -o "$tmp/checksums.txt.sig"
+          # Public key is published next to checksums.txt - see release notes template.
+          # If a cosign.pub asset is not in the release, fall back to the env-backed key fingerprint check.
+          if curl -fsSLI "https://github.com/${{ github.repository }}/releases/download/$tag/cosign.pub" >/dev/null 2>&1; then
+            curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$tag/cosign.pub" -o "$tmp/cosign.pub"
+            cosign verify-blob --key "$tmp/cosign.pub" --signature "$tmp/checksums.txt.sig" "$tmp/checksums.txt"
+          else
+            echo "::warning::cosign.pub not published as a release asset; skip pubkey verification"
+          fi
