@@ -69,7 +69,7 @@ func CCXHome() (string, error) {
 // parseUnixShell maps the basename of a $SHELL value to a contracts.Shell.
 // Exposed as an unexported helper so platform_unix.go (darwin+linux) and the
 // table-driven tests can share the mapping.
-func parseUnixShell(shellEnv string) contracts.Shell { //nolint:unused // used by OS-specific files added later in this plan
+func parseUnixShell(shellEnv string) contracts.Shell { //nolint:unused // used after public wrappers are added in the next task
 	if shellEnv == "" {
 		return contracts.ShellUnknown
 	}
