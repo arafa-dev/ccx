@@ -1,0 +1,34 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "ignorePaths": [
+    "node_modules",
+    "dist",
+    "web/out",
+    "**/*.svg",
+    "**/go.sum"
+  ],
+  "words": [
+    "anthropic",
+    "arafa",
+    "bubbletea",
+    "ccusage",
+    "ccx",
+    "cobra",
+    "cosign",
+    "fsnotify",
+    "gofumpt",
+    "goreleaser",
+    "lefthook",
+    "lipgloss",
+    "modernc",
+    "nfpm",
+    "pelletier",
+    "pnpm",
+    "pwsh",
+    "Recharts",
+    "shadcn",
+    "sqlite",
+    "vhs"
+  ]
+}

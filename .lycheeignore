@@ -1,0 +1,7 @@
+# Placeholder URLs that won't exist until launch
+https://ccx.sh/install
+https://github.com/arafa-dev/ccx/releases/latest/.*
+https://github.com/arafa-dev/scoop-ccx
+https://github.com/arafa-dev/homebrew-ccx
+# Trademark links that occasionally rate-limit
+https://trademarks.justia.com/.*
