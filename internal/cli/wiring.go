@@ -71,11 +71,11 @@ type storeCursorAdapter struct {
 	store contracts.Store
 }
 
-func (a *storeCursorAdapter) Get(ctx context.Context, profile, file string) (scanner.Cursor, error) {
-	off, ino, err := a.store.GetCursor(ctx, profile, file)
+func (a *storeCursorAdapter) Get(ctx context.Context, profileName, file string) (scanner.Cursor, error) {
+	off, ino, err := a.store.GetCursor(ctx, profileName, file)
 	return scanner.Cursor{Offset: off, Inode: ino}, err
 }
 
-func (a *storeCursorAdapter) Set(ctx context.Context, profile, file string, c scanner.Cursor) error {
-	return a.store.SetCursor(ctx, profile, file, c.Offset, c.Inode)
+func (a *storeCursorAdapter) Set(ctx context.Context, profileName, file string, c scanner.Cursor) error {
+	return a.store.SetCursor(ctx, profileName, file, c.Offset, c.Inode)
 }

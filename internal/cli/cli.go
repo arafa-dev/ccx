@@ -93,10 +93,6 @@ func newVersionCommand(opts *Options) *cobra.Command {
 	}
 }
 
-func newProfileCommand(_ *Options) *cobra.Command {
-	return &cobra.Command{Use: "profile", Short: "Manage profiles", RunE: notImpl("profile")}
-}
-
 func newUseCommand(_ *Options) *cobra.Command {
 	return &cobra.Command{Use: "use", Short: "Activate a profile", RunE: notImpl("use")}
 }
