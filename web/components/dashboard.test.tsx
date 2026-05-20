@@ -59,7 +59,7 @@ const allRows: UsageRow[] = [
 ];
 
 vi.mock('@/lib/api', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
+  const actual = await vi.importActual<Record<string, unknown>>('@/lib/api');
   return {
     ...actual,
     getProfiles: vi.fn(async () => profiles),
