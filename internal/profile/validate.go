@@ -3,10 +3,12 @@ package profile
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
+	"regexp"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
 )
+
+var profileNamePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 // ValidateProfile checks that p is well-formed enough to be stored in the
 // registry. It does NOT touch the filesystem; existence checks are done by
@@ -14,7 +16,7 @@ import (
 //
 // Rules:
 //   - Name is non-empty
-//   - Name contains no path separators, whitespace, or "." / ".."
+//   - Name matches ^[a-z0-9-]+$
 //   - ConfigDir is non-empty and absolute (filepath.IsAbs)
 func ValidateProfile(p contracts.Profile) error { //nolint:gocritic // Profile is a value-style contract type.
 	if err := validateName(p.Name); err != nil {
@@ -33,17 +35,8 @@ func validateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("profile: name is empty")
 	}
-	if name == "." || name == ".." {
-		return fmt.Errorf("profile: name %q is reserved", name)
-	}
-	if strings.ContainsAny(name, "/\\") {
-		return fmt.Errorf("profile: name %q contains a path separator", name)
-	}
-	for _, r := range name {
-		switch r {
-		case ' ', '\t', '\n', '\r':
-			return fmt.Errorf("profile: name %q contains whitespace", name)
-		}
+	if !profileNamePattern.MatchString(name) {
+		return fmt.Errorf("profile: name %q must match ^[a-z0-9-]+$", name)
 	}
 	return nil
 }

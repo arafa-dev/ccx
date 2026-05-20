@@ -58,3 +58,17 @@ func TestValidateProfileRejectsNamesWithSlashOrSpace(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateProfileNameRegex(t *testing.T) {
+	for _, name := range []string{"Work", "my_profile", "abc!"} {
+		p := contracts.Profile{Name: name, ConfigDir: "/abs/x"}
+		if err := profile.ValidateProfile(p); err == nil {
+			t.Errorf("expected error for name %q, got nil", name)
+		}
+	}
+
+	p := contracts.Profile{Name: "123-ok", ConfigDir: "/abs/x"}
+	if err := profile.ValidateProfile(p); err != nil {
+		t.Fatalf("expected valid name, got %v", err)
+	}
+}
