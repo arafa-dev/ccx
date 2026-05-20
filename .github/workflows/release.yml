@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write # to create the GitHub Release
   packages: write # in case docker pushes are added later
-  id-token: write # for cosign keyless (kept for future use)
 
 concurrency:
   group: release-${{ github.ref }}
