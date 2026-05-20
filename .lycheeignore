@@ -1,0 +1,14 @@
+# Placeholder URLs that won't exist until launch
+https://ccx.sh/install
+https://github.com/arafa-dev/ccx/releases/latest/.*
+https://github.com/arafa-dev/scoop-ccx
+https://github.com/arafa-dev/homebrew-ccx
+# Placeholder image assets generated in later phases
+docs/assets/architecture.png
+docs/assets/dashboard.png
+docs/assets/demo.gif
+assets/architecture.png
+# Archived implementation plans contain relative links meant for agent context
+file://.*/docs/superpowers/.*
+# Trademark links that occasionally rate-limit
+https://trademarks.justia.com/.*

@@ -1,0 +1,42 @@
+name: Docs
+
+on:
+  pull_request:
+    paths:
+      - "**/*.md"
+      - "docs/**"
+      - ".markdownlint.json"
+      - ".cspell.json"
+      - ".lycheeignore"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/*.md"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: markdownlint
+        run: npx --yes markdownlint-cli "**/*.md" --ignore node_modules --ignore web/out
+      - name: cspell
+        run: npx --yes cspell --no-progress "**/*.md"
+      - name: lychee link check
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: "--no-progress --exclude-file .lycheeignore README.md docs/**/*.md"
+          fail: true

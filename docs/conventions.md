@@ -33,7 +33,7 @@ main, not a feature-branch edit.
 ## 4. CLI exit codes
 
 | Code | Meaning |
-|---|---|
+| --- | --- |
 | 0 | Success |
 | 1 | User error (bad input, missing profile, etc.) |
 | 2 | Internal error |
