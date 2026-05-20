@@ -118,6 +118,24 @@ func TestAddRejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestAddDuplicateNameDoesNotCreateConfigDir(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg1 := makeAbsDir(t, "work")
+	cfg2 := filepath.Join(t.TempDir(), "orphan", "work2")
+
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg1}); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+	err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg2})
+	if !errors.Is(err, contracts.ErrProfileAlreadyExists) {
+		t.Fatalf("expected ErrProfileAlreadyExists, got %v", err)
+	}
+	if _, err := os.Stat(cfg2); !os.IsNotExist(err) {
+		t.Fatalf("duplicate Add should not create config dir, stat err=%v", err)
+	}
+}
+
 func TestAddCreatesMissingConfigDir(t *testing.T) {
 	ctx := context.Background()
 	mgr := newTestManager(t)

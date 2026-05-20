@@ -68,10 +68,6 @@ func (m *Manager) Add(ctx context.Context, p contracts.Profile) error { //nolint
 		return err
 	}
 
-	if err := ensureConfigDir(p.ConfigDir); err != nil {
-		return fmt.Errorf("preparing config dir %q: %w", p.ConfigDir, err)
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -87,6 +83,10 @@ func (m *Manager) Add(ctx context.Context, p contracts.Profile) error { //nolint
 		if existing.ConfigDir == p.ConfigDir {
 			return fmt.Errorf("config_dir %q already used by profile %q: %w", p.ConfigDir, existing.Name, contracts.ErrConfigDirConflict)
 		}
+	}
+
+	if err := ensureConfigDir(p.ConfigDir); err != nil {
+		return fmt.Errorf("preparing config dir %q: %w", p.ConfigDir, err)
 	}
 
 	now := time.Now().UTC()
