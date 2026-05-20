@@ -3,7 +3,7 @@
 ## macOS
 
 ```bash
-brew install arafa-dev/tap/ccx
+brew install arafa-dev/ccx/ccx
 ```
 
 Requires Homebrew. After install, set up shell integration once:
@@ -33,7 +33,7 @@ sudo rpm -i https://github.com/arafa-dev/ccx/releases/latest/download/ccx_linux_
 ### Other distros (binary)
 
 ```bash
-curl -fsSL https://ccx.sh/install | sh
+curl -fsSL https://raw.githubusercontent.com/arafa-dev/ccx/main/install.sh | sh
 ```
 
 The script picks the right binary for your OS and arch, verifies its SHA256, and installs it to `/usr/local/bin/ccx` (or `~/.local/bin/ccx` if not root).

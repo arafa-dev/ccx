@@ -13,7 +13,7 @@
 
 ```bash
 # macOS / Linux
-brew install arafa-dev/tap/ccx
+brew install arafa-dev/ccx/ccx
 
 # Windows
 scoop bucket add ccx https://github.com/arafa-dev/scoop-ccx
@@ -24,7 +24,7 @@ curl -fsSL https://github.com/arafa-dev/ccx/releases/latest/download/ccx_linux_a
 sudo dpkg -i /tmp/ccx.deb
 
 # One-liner (macOS / Linux)
-curl -fsSL https://ccx.sh/install | sh
+curl -fsSL https://raw.githubusercontent.com/arafa-dev/ccx/main/install.sh | sh
 
 # From source
 go install github.com/arafa-dev/ccx/cmd/ccx@latest
