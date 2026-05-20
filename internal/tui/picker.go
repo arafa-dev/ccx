@@ -9,7 +9,7 @@ import (
 	"github.com/arafa-dev/ccx/internal/contracts"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"golang.org/x/term"
+	"github.com/mattn/go-isatty"
 )
 
 // PickProfile prompts the user to select one profile from the list.
@@ -18,7 +18,7 @@ func PickProfile(profiles []contracts.Profile) (contracts.Profile, error) {
 	if len(profiles) == 0 {
 		return contracts.Profile{}, errors.New("no profiles to pick from")
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !isatty.IsTerminal(os.Stdin.Fd()) {
 		return profiles[0], nil
 	}
 	m := initialModel(profiles)
