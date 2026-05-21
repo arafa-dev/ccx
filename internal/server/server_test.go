@@ -39,7 +39,7 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
-func TestSecurityHeadersAllowStaticDashboardBootstrap(t *testing.T) {
+func TestSecurityHeadersAllowNextInlineBootScripts(t *testing.T) {
 	srv := server.New(server.Deps{Store: &mockStore{}, Pricing: &mockPricing{}}, "test")
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -52,7 +52,7 @@ func TestSecurityHeadersAllowStaticDashboardBootstrap(t *testing.T) {
 
 	csp := res.Header.Get("Content-Security-Policy")
 	if !strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
-		t.Fatalf("Content-Security-Policy = %q, want inline scripts allowed for static dashboard bootstrap", csp)
+		t.Fatalf("CSP = %q, want script-src to allow Next.js inline boot scripts", csp)
 	}
 }
 

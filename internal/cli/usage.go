@@ -114,6 +114,9 @@ func ingestAllProfiles(ctx context.Context, deps *Deps) error {
 		return err
 	}
 	for _, p := range profiles {
+		if err := deps.Store.SaveProfile(ctx, p); err != nil {
+			return fmt.Errorf("saving profile %q before scan: %w", p.Name, err)
+		}
 		events, errs := deps.Scanner.Scan(ctx, p)
 		batch := make([]contracts.Event, 0, 256)
 		flush := func() error {
