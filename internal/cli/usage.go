@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"text/tabwriter"
 	"time"
 
@@ -46,12 +47,8 @@ func newUsageCommand(_ *Options) *cobra.Command {
 				return err
 			}
 
-			var total float64
-			for i, r := range rows {
-				cost, _ := deps.Pricing.Cost(r.Model, r.Day, r.Usage)
-				rows[i].EstimatedUSD = cost
-				total += cost
-			}
+			total, pricingWarnings := priceUsageRows(rows, deps.Pricing)
+			writePricingWarnings(c.ErrOrStderr(), pricingWarnings)
 
 			if asJSON {
 				return json.NewEncoder(c.OutOrStdout()).Encode(map[string]any{
@@ -66,6 +63,36 @@ func newUsageCommand(_ *Options) *cobra.Command {
 	cmd.Flags().StringVar(&since, "since", "24h", "lookback window (e.g. 1d, 7d, 30d)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON output")
 	return cmd
+}
+
+func priceUsageRows(rows []contracts.UsageRow, pricing contracts.PricingTable) (total float64, warnings []string) {
+	for i, r := range rows {
+		cost, err := pricing.Cost(r.Model, r.Day, r.Usage)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf(
+				"profile %q project %q model %q day %s: %v",
+				r.Profile,
+				r.Project,
+				r.Model,
+				r.Day.Format("2006-01-02"),
+				err,
+			))
+			cost = 0
+		}
+		rows[i].EstimatedUSD = cost
+		total += cost
+	}
+	return total, warnings
+}
+
+func writePricingWarnings(w io.Writer, warnings []string) {
+	if len(warnings) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "Warning: pricing lookup failed for %d usage row(s); costs defaulted to $0.00.\n", len(warnings))
+	for _, warning := range warnings {
+		_, _ = fmt.Fprintf(w, "  - %s\n", warning)
+	}
 }
 
 func parseSince(s string) (time.Duration, error) {
@@ -155,7 +182,13 @@ func renderUsageTable(w io.Writer, rows []contracts.UsageRow, total float64, win
 			a.top = r.Project
 		}
 	}
-	for name, a := range per {
+	names := make([]string, 0, len(per))
+	for name := range per {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		a := per[name]
 		if a.top == "" {
 			a.top = "-"
 		}
