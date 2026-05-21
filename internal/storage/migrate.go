@@ -8,6 +8,18 @@ import (
 
 const currentSchemaVersion = 2
 
+var profileLimitColumns = []struct {
+	name string
+	def  string
+}{
+	{name: "daily_token_budget", def: "daily_token_budget INTEGER"},
+	{name: "weekly_token_budget", def: "weekly_token_budget INTEGER"},
+	{name: "monthly_usd_budget", def: "monthly_usd_budget REAL"},
+	{name: "priority", def: "priority INTEGER"},
+	{name: "suggest_enabled", def: "suggest_enabled INTEGER"},
+	{name: "rate_limit_cooldown", def: "rate_limit_cooldown TEXT"},
+}
+
 const migrationV2SQL = `
 CREATE TABLE IF NOT EXISTS hook_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,6 +116,10 @@ func (s *Store) Migrate(ctx context.Context) (retErr error) {
 		}
 	}
 
+	if err := ensureProfileLimitColumns(ctx, tx); err != nil {
+		return fmt.Errorf("ensuring profile limit columns: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration: %w", err)
 	}
@@ -130,4 +146,49 @@ func schemaVersion(ctx context.Context, tx *sql.Tx) (int, error) {
 		return 0, nil
 	}
 	return int(version.Int64), nil
+}
+
+func ensureProfileLimitColumns(ctx context.Context, tx *sql.Tx) error {
+	for _, column := range profileLimitColumns {
+		exists, err := profileColumnExists(ctx, tx, column.name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE profiles ADD COLUMN "+column.def); err != nil {
+			return fmt.Errorf("adding profiles.%s: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+func profileColumnExists(ctx context.Context, tx *sql.Tx, columnName string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(profiles)")
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			return false, err
+		}
+		if name == columnName {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }

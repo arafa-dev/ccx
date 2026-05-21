@@ -3,6 +3,7 @@ package storage_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -82,6 +83,56 @@ func TestSaveProfileUpsertOverwrites(t *testing.T) {
 	}
 	if got.Label != "new" || got.Color != "#FFFFFF" || !got.LastUsedAt.Equal(t1) {
 		t.Errorf("upsert did not overwrite:\n got  %+v\n want label=new color=#FFFFFF lastUsed=%v", got, t1)
+	}
+}
+
+func TestSaveGetAndListProfileRoundTripLimits(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	suggest := false
+	t0 := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	in := contracts.Profile{
+		Name:       "work",
+		ConfigDir:  "/p/work",
+		CreatedAt:  t0,
+		LastUsedAt: t0,
+		Limits: contracts.ProfileLimits{
+			DailyTokenBudget:  100000,
+			WeeklyTokenBudget: 500000,
+			MonthlyUSDBudget:  250.75,
+			Priority:          -4,
+			SuggestEnabled:    &suggest,
+			RateLimitCooldown: "2h30m",
+		},
+	}
+
+	if err := s.SaveProfile(ctx, in); err != nil {
+		t.Fatalf("SaveProfile: %v", err)
+	}
+
+	got, err := s.GetProfile(ctx, "work")
+	if err != nil {
+		t.Fatalf("GetProfile: %v", err)
+	}
+	if !reflect.DeepEqual(got.Limits, in.Limits) {
+		t.Errorf("GetProfile limits mismatch:\n got  %+v\n want %+v", got.Limits, in.Limits)
+	}
+
+	list, err := s.ListProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListProfiles: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListProfiles len = %d, want 1", len(list))
+	}
+	if !reflect.DeepEqual(list[0].Limits, in.Limits) {
+		t.Errorf("ListProfiles limits mismatch:\n got  %+v\n want %+v", list[0].Limits, in.Limits)
+	}
+	if list[0].Limits.SuggestEnabled == nil {
+		t.Fatalf("ListProfiles SuggestEnabled = nil, want pointer to false")
+	}
+	if *list[0].Limits.SuggestEnabled {
+		t.Fatalf("ListProfiles SuggestEnabled = true, want false")
 	}
 }
 

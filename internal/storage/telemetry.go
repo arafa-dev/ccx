@@ -81,15 +81,27 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 	}
 
 	ts := unixNano(event.Timestamp)
+	if found && ts <= rec.LastSeenAt {
+		applyReplayOnly(&rec, &event, ts)
+		if err := saveSessionRecord(ctx, tx, &rec); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit session replay for %q/%q: %w", profileName, event.Session, err)
+		}
+		return nil
+	}
+
 	rec.LastSeenAt = ts
 	mergeEventMetadata(&rec, &event)
-
 	switch event.Event {
 	case "SessionStart":
 		if !rec.StartedAt.Valid {
 			rec.StartedAt = sql.NullInt64{Int64: ts, Valid: true}
 		}
-		rec.Status = "running"
+		if !isTerminalSessionStatus(rec.Status) {
+			rec.Status = "running"
+		}
 	case "Stop":
 		rec.Status = "completed"
 		rec.FailureError = ""
@@ -108,7 +120,9 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 	case "PostCompact":
 		rec.CompactCount++
 	default:
-		rec.Status = "unknown"
+		if rec.Status == "" {
+			rec.Status = "unknown"
+		}
 	}
 
 	if err := saveSessionRecord(ctx, tx, &rec); err != nil {
@@ -413,6 +427,16 @@ func mergeEventMetadata(rec *sessionRecord, event *contracts.HookEvent) {
 	if event.Permission != "" {
 		rec.PermissionMode = event.Permission
 	}
+}
+
+func applyReplayOnly(rec *sessionRecord, event *contracts.HookEvent, ts int64) {
+	if event.Event == "SessionStart" && !rec.StartedAt.Valid {
+		rec.StartedAt = sql.NullInt64{Int64: ts, Valid: true}
+	}
+}
+
+func isTerminalSessionStatus(status string) bool {
+	return status == "completed" || status == "failed" || status == "ended"
 }
 
 func scanSessionTelemetry(rows *sql.Rows) (contracts.SessionTelemetry, error) {

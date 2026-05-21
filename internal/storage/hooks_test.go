@@ -166,6 +166,137 @@ func TestUpsertSessionTelemetryStopCompletesSession(t *testing.T) {
 	}
 }
 
+func TestUpsertSessionTelemetryOutOfOrderStartPreservesFailedStatus(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(time.Minute),
+		Error:        "429",
+		ErrorDetails: "rate limited",
+	}); err != nil {
+		t.Fatalf("StopFailure: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "SessionStart",
+		Timestamp: start,
+		Model:     "claude-opus-4-7",
+	}); err != nil {
+		t.Fatalf("late SessionStart: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "failed" {
+		t.Errorf("Status = %q, want failed", got[0].Status)
+	}
+	if !got[0].LastSeenAt.Equal(start.Add(time.Minute)) {
+		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(time.Minute))
+	}
+	if got[0].FailureError != "429" || got[0].FailureDetails != "rate limited" {
+		t.Errorf("failure fields = (%q, %q), want (429, rate limited)", got[0].FailureError, got[0].FailureDetails)
+	}
+}
+
+func TestUpsertSessionTelemetryUnknownEventPreservesCompletedStatus(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 13, 0, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "SessionStart",
+		Timestamp: start,
+	}); err != nil {
+		t.Fatalf("SessionStart: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "Stop",
+		Timestamp: start.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "FutureHook",
+		Timestamp: start.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("FutureHook: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "completed" {
+		t.Errorf("Status = %q, want completed", got[0].Status)
+	}
+	if !got[0].LastSeenAt.Equal(start.Add(2 * time.Minute)) {
+		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(2*time.Minute))
+	}
+}
+
+func TestUpsertSessionTelemetryOlderEventDoesNotMoveLastSeenBackward(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "SessionStart",
+		Timestamp: start,
+	}); err != nil {
+		t.Fatalf("SessionStart: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "Stop",
+		Timestamp: start.Add(5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "PostCompact",
+		Timestamp: start.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("old PostCompact: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "completed" {
+		t.Errorf("Status = %q, want completed", got[0].Status)
+	}
+	if !got[0].LastSeenAt.Equal(start.Add(5 * time.Minute)) {
+		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(5*time.Minute))
+	}
+	if got[0].CompactCount != 0 {
+		t.Errorf("CompactCount = %d, want 0 for replayed older compact event", got[0].CompactCount)
+	}
+}
+
 func TestProfileHealthSaveGet(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

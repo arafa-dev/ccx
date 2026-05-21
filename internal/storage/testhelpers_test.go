@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 )
@@ -42,6 +43,57 @@ func (s *Store) ExecSQL(ctx context.Context, t *testing.T, sql string) {
 	if _, err := s.db.ExecContext(ctx, sql); err != nil {
 		t.Fatalf("ExecSQL: %v", err)
 	}
+}
+
+// DropProfileLimitColumns removes limit columns from profiles when present.
+// Test-only helper used to simulate DBs created by an older v2 migration.
+func (s *Store) DropProfileLimitColumns(ctx context.Context, t *testing.T) {
+	t.Helper()
+	for _, column := range []string{
+		"daily_token_budget",
+		"weekly_token_budget",
+		"monthly_usd_budget",
+		"priority",
+		"suggest_enabled",
+		"rate_limit_cooldown",
+	} {
+		if !s.columnExists(ctx, t, "profiles", column) {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE profiles DROP COLUMN %s", column)); err != nil {
+			t.Fatalf("dropping profiles.%s: %v", column, err)
+		}
+	}
+}
+
+func (s *Store) columnExists(ctx context.Context, t *testing.T, table, column string) bool {
+	t.Helper()
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(%s): %v", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			t.Fatalf("scanning table_info(%s): %v", table, err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterating table_info(%s): %v", table, err)
+	}
+	return false
 }
 
 // SchemaVersion returns the single row from the schema_version table.
