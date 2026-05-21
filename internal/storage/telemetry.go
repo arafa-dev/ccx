@@ -1,0 +1,465 @@
+package storage
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/arafa-dev/ccx/internal/contracts"
+)
+
+// InsertHookEvent stores one hook event. The profileName argument is
+// authoritative because hook payloads may be forwarded without a profile
+// field; event.Profile is used only as a fallback.
+func (s *Store) InsertHookEvent(ctx context.Context, profileName string, event contracts.HookEvent) error { //nolint:gocritic // contracts.Store requires a value parameter.
+	if profileName == "" {
+		profileName = event.Profile
+	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	const q = `
+INSERT INTO hook_events (
+    profile_name, session_id, event_name, ts, transcript_path, cwd, model,
+    source, permission_mode, reason, error, error_details, trigger
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+	if _, err := s.db.ExecContext(
+		ctx, q,
+		profileName,
+		event.Session,
+		event.Event,
+		unixNano(event.Timestamp),
+		event.Transcript,
+		event.CWD,
+		event.Model,
+		event.Source,
+		event.Permission,
+		event.Reason,
+		event.Error,
+		event.ErrorDetails,
+		event.Trigger,
+	); err != nil {
+		return fmt.Errorf("inserting hook event %q for %q: %w", event.Event, profileName, err)
+	}
+	return nil
+}
+
+// UpsertSessionTelemetry folds one hook event into the session aggregate row.
+func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, event contracts.HookEvent) (retErr error) { //nolint:gocritic // contracts.Store requires a value parameter.
+	if profileName == "" {
+		profileName = event.Profile
+	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin session upsert for %q/%q: %w", profileName, event.Session, err)
+	}
+	defer func() {
+		if retErr != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	rec, found, err := loadSessionRecord(ctx, tx, profileName, event.Session)
+	if err != nil {
+		return err
+	}
+	if !found {
+		rec = sessionRecord{
+			ProfileName: profileName,
+			SessionID:   event.Session,
+			Status:      "unknown",
+		}
+	}
+
+	ts := unixNano(event.Timestamp)
+	rec.LastSeenAt = ts
+	mergeEventMetadata(&rec, &event)
+
+	switch event.Event {
+	case "SessionStart":
+		if !rec.StartedAt.Valid {
+			rec.StartedAt = sql.NullInt64{Int64: ts, Valid: true}
+		}
+		rec.Status = "running"
+	case "Stop":
+		rec.Status = "completed"
+		rec.FailureError = ""
+		rec.FailureDetails = ""
+	case "StopFailure":
+		rec.Status = "failed"
+		rec.FailureError = event.Error
+		rec.FailureDetails = event.ErrorDetails
+	case "SessionEnd":
+		rec.EndedAt = sql.NullInt64{Int64: ts, Valid: true}
+		if rec.Status != "failed" {
+			rec.Status = "ended"
+		}
+		rec.EndReason = event.Reason
+	case "PreCompact":
+	case "PostCompact":
+		rec.CompactCount++
+	default:
+		rec.Status = "unknown"
+	}
+
+	if err := saveSessionRecord(ctx, tx, &rec); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit session upsert for %q/%q: %w", profileName, event.Session, err)
+	}
+	return nil
+}
+
+// QuerySessions returns session aggregates ordered by most recent activity.
+func (s *Store) QuerySessions(ctx context.Context, q contracts.SessionQuery) ([]contracts.SessionTelemetry, error) { //nolint:gocritic // contracts.Store requires a value parameter.
+	var (
+		where []string
+		args  []any
+	)
+	if q.Profile != "" {
+		where = append(where, "profile_name = ?")
+		args = append(args, q.Profile)
+	}
+	if q.Status != "" {
+		where = append(where, "status = ?")
+		args = append(args, q.Status)
+	}
+	if !q.Since.IsZero() {
+		where = append(where, "last_seen_at >= ?")
+		args = append(args, unixNano(q.Since))
+	}
+
+	whereSQL := ""
+	if len(where) > 0 {
+		whereSQL = "WHERE " + strings.Join(where, " AND ")
+	}
+
+	query := `
+SELECT
+    profile_name,
+    session_id,
+    COALESCE(transcript_path, ''),
+    COALESCE(cwd, ''),
+    COALESCE(model, ''),
+    COALESCE(source, ''),
+    COALESCE(permission_mode, ''),
+    started_at,
+    ended_at,
+    last_seen_at,
+    status,
+    COALESCE(end_reason, ''),
+    COALESCE(failure_error, ''),
+    COALESCE(failure_details, ''),
+    compact_count
+FROM sessions
+` + whereSQL + `
+ORDER BY last_seen_at DESC
+`
+	if q.Limit > 0 {
+		query += "LIMIT ?\n"
+		args = append(args, q.Limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying sessions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []contracts.SessionTelemetry
+	for rows.Next() {
+		session, err := scanSessionTelemetry(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating session rows: %w", err)
+	}
+	return out, nil
+}
+
+// QueryRecentFailures returns StopFailure hook events ordered newest first.
+func (s *Store) QueryRecentFailures(ctx context.Context, profileName string, since time.Time) ([]contracts.HookEvent, error) {
+	const q = `
+SELECT
+    profile_name,
+    session_id,
+    event_name,
+    ts,
+    COALESCE(transcript_path, ''),
+    COALESCE(cwd, ''),
+    COALESCE(model, ''),
+    COALESCE(source, ''),
+    COALESCE(permission_mode, ''),
+    COALESCE(reason, ''),
+    COALESCE(error, ''),
+    COALESCE(error_details, ''),
+    COALESCE(trigger, '')
+FROM hook_events
+WHERE profile_name = ? AND event_name = 'StopFailure' AND ts >= ?
+ORDER BY ts DESC
+`
+	rows, err := s.db.QueryContext(ctx, q, profileName, unixNano(since))
+	if err != nil {
+		return nil, fmt.Errorf("querying recent failures for %q: %w", profileName, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []contracts.HookEvent
+	for rows.Next() {
+		var (
+			ev contracts.HookEvent
+			ns int64
+		)
+		if err := rows.Scan(
+			&ev.Profile,
+			&ev.Session,
+			&ev.Event,
+			&ns,
+			&ev.Transcript,
+			&ev.CWD,
+			&ev.Model,
+			&ev.Source,
+			&ev.Permission,
+			&ev.Reason,
+			&ev.Error,
+			&ev.ErrorDetails,
+			&ev.Trigger,
+		); err != nil {
+			return nil, fmt.Errorf("scanning recent failure row: %w", err)
+		}
+		ev.Timestamp = time.Unix(0, ns).UTC()
+		out = append(out, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating recent failure rows: %w", err)
+	}
+	return out, nil
+}
+
+// SaveProfileHealth upserts the latest health check for a profile.
+func (s *Store) SaveProfileHealth(ctx context.Context, health contracts.ProfileHealth) error { //nolint:gocritic // contracts.Store requires a value parameter.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	const q = `
+INSERT INTO profile_health (profile_name, checked_at, auth_status, auth_detail)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(profile_name) DO UPDATE SET
+    checked_at  = excluded.checked_at,
+    auth_status = excluded.auth_status,
+    auth_detail = excluded.auth_detail
+`
+	if _, err := s.db.ExecContext(ctx, q, health.Profile, unixNano(health.CheckedAt), health.AuthStatus, health.AuthDetail); err != nil {
+		return fmt.Errorf("saving profile health %q: %w", health.Profile, err)
+	}
+	return nil
+}
+
+// GetProfileHealth returns the latest health check for a profile.
+func (s *Store) GetProfileHealth(ctx context.Context, profileName string) (contracts.ProfileHealth, error) {
+	const q = `
+SELECT profile_name, checked_at, auth_status, COALESCE(auth_detail, '')
+FROM profile_health
+WHERE profile_name = ?
+`
+	var (
+		health contracts.ProfileHealth
+		ns     int64
+	)
+	err := s.db.QueryRowContext(ctx, q, profileName).Scan(&health.Profile, &ns, &health.AuthStatus, &health.AuthDetail)
+	if errors.Is(err, sql.ErrNoRows) {
+		return contracts.ProfileHealth{}, fmt.Errorf("profile health %q: %w", profileName, contracts.ErrProfileNotFound)
+	}
+	if err != nil {
+		return contracts.ProfileHealth{}, fmt.Errorf("getting profile health %q: %w", profileName, err)
+	}
+	health.CheckedAt = time.Unix(0, ns).UTC()
+	return health, nil
+}
+
+type sessionRecord struct {
+	ProfileName    string
+	SessionID      string
+	TranscriptPath string
+	CWD            string
+	Model          string
+	Source         string
+	PermissionMode string
+	StartedAt      sql.NullInt64
+	EndedAt        sql.NullInt64
+	LastSeenAt     int64
+	Status         string
+	EndReason      string
+	FailureError   string
+	FailureDetails string
+	CompactCount   int
+}
+
+func loadSessionRecord(ctx context.Context, tx *sql.Tx, profileName, sessionID string) (sessionRecord, bool, error) {
+	const q = `
+SELECT
+    COALESCE(transcript_path, ''),
+    COALESCE(cwd, ''),
+    COALESCE(model, ''),
+    COALESCE(source, ''),
+    COALESCE(permission_mode, ''),
+    started_at,
+    ended_at,
+    last_seen_at,
+    status,
+    COALESCE(end_reason, ''),
+    COALESCE(failure_error, ''),
+    COALESCE(failure_details, ''),
+    compact_count
+FROM sessions
+WHERE profile_name = ? AND session_id = ?
+`
+	rec := sessionRecord{ProfileName: profileName, SessionID: sessionID}
+	err := tx.QueryRowContext(ctx, q, profileName, sessionID).Scan(
+		&rec.TranscriptPath,
+		&rec.CWD,
+		&rec.Model,
+		&rec.Source,
+		&rec.PermissionMode,
+		&rec.StartedAt,
+		&rec.EndedAt,
+		&rec.LastSeenAt,
+		&rec.Status,
+		&rec.EndReason,
+		&rec.FailureError,
+		&rec.FailureDetails,
+		&rec.CompactCount,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sessionRecord{}, false, nil
+	}
+	if err != nil {
+		return sessionRecord{}, false, fmt.Errorf("loading session %q/%q: %w", profileName, sessionID, err)
+	}
+	return rec, true, nil
+}
+
+func saveSessionRecord(ctx context.Context, tx *sql.Tx, rec *sessionRecord) error {
+	const q = `
+INSERT INTO sessions (
+    profile_name, session_id, transcript_path, cwd, model, source,
+    permission_mode, started_at, ended_at, last_seen_at, status, end_reason,
+    failure_error, failure_details, compact_count
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(profile_name, session_id) DO UPDATE SET
+    transcript_path = excluded.transcript_path,
+    cwd             = excluded.cwd,
+    model           = excluded.model,
+    source          = excluded.source,
+    permission_mode = excluded.permission_mode,
+    started_at      = excluded.started_at,
+    ended_at        = excluded.ended_at,
+    last_seen_at    = excluded.last_seen_at,
+    status          = excluded.status,
+    end_reason      = excluded.end_reason,
+    failure_error   = excluded.failure_error,
+    failure_details = excluded.failure_details,
+    compact_count   = excluded.compact_count
+`
+	if _, err := tx.ExecContext(
+		ctx, q,
+		rec.ProfileName,
+		rec.SessionID,
+		rec.TranscriptPath,
+		rec.CWD,
+		rec.Model,
+		rec.Source,
+		rec.PermissionMode,
+		nullableInt64(rec.StartedAt),
+		nullableInt64(rec.EndedAt),
+		rec.LastSeenAt,
+		rec.Status,
+		rec.EndReason,
+		rec.FailureError,
+		rec.FailureDetails,
+		rec.CompactCount,
+	); err != nil {
+		return fmt.Errorf("saving session %q/%q: %w", rec.ProfileName, rec.SessionID, err)
+	}
+	return nil
+}
+
+func mergeEventMetadata(rec *sessionRecord, event *contracts.HookEvent) {
+	if event.Transcript != "" {
+		rec.TranscriptPath = event.Transcript
+	}
+	if event.CWD != "" {
+		rec.CWD = event.CWD
+	}
+	if event.Model != "" {
+		rec.Model = event.Model
+	}
+	if event.Source != "" {
+		rec.Source = event.Source
+	}
+	if event.Permission != "" {
+		rec.PermissionMode = event.Permission
+	}
+}
+
+func scanSessionTelemetry(rows *sql.Rows) (contracts.SessionTelemetry, error) {
+	var (
+		session          contracts.SessionTelemetry
+		started, ended   sql.NullInt64
+		lastSeenUnixNano int64
+	)
+	if err := rows.Scan(
+		&session.Profile,
+		&session.Session,
+		&session.Transcript,
+		&session.CWD,
+		&session.Model,
+		&session.Source,
+		&session.Permission,
+		&started,
+		&ended,
+		&lastSeenUnixNano,
+		&session.Status,
+		&session.EndReason,
+		&session.FailureError,
+		&session.FailureDetails,
+		&session.CompactCount,
+	); err != nil {
+		return contracts.SessionTelemetry{}, fmt.Errorf("scanning session row: %w", err)
+	}
+	if started.Valid {
+		session.StartedAt = time.Unix(0, started.Int64).UTC()
+	}
+	if ended.Valid {
+		session.EndedAt = time.Unix(0, ended.Int64).UTC()
+	}
+	session.LastSeenAt = time.Unix(0, lastSeenUnixNano).UTC()
+	return session, nil
+}
+
+func nullableInt64(v sql.NullInt64) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.Int64
+}
+
+func unixNano(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixNano()
+}

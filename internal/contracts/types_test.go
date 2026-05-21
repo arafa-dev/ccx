@@ -2,6 +2,7 @@ package contracts_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 )
 
 func TestProfileJSONRoundtrip(t *testing.T) {
+	suggest := false
 	in := contracts.Profile{
 		Name:       "work",
 		ConfigDir:  "/Users/arafa/.claude-profiles/work",
@@ -16,6 +18,14 @@ func TestProfileJSONRoundtrip(t *testing.T) {
 		Color:      "#3B82F6",
 		CreatedAt:  time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC),
 		LastUsedAt: time.Date(2026, 5, 19, 15, 30, 0, 0, time.UTC),
+		Limits: contracts.ProfileLimits{
+			DailyTokenBudget:  120000,
+			WeeklyTokenBudget: 500000,
+			MonthlyUSDBudget:  150.50,
+			Priority:          10,
+			SuggestEnabled:    &suggest,
+			RateLimitCooldown: "2h30m",
+		},
 	}
 
 	data, err := json.Marshal(in)
@@ -28,8 +38,186 @@ func TestProfileJSONRoundtrip(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if out != in {
+	if !reflect.DeepEqual(out, in) {
 		t.Errorf("roundtrip mismatch:\n got  %+v\n want %+v", out, in)
+	}
+}
+
+func TestProfileLimitsJSONUsesContractFieldNames(t *testing.T) {
+	suggest := true
+	p := contracts.Profile{
+		Name:      "work",
+		ConfigDir: "/Users/arafa/.claude-profiles/work",
+		Limits: contracts.ProfileLimits{
+			DailyTokenBudget:  1000,
+			WeeklyTokenBudget: 7000,
+			MonthlyUSDBudget:  99.95,
+			Priority:          -2,
+			SuggestEnabled:    &suggest,
+			RateLimitCooldown: "45m",
+		},
+	}
+
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal fields: %v", err)
+	}
+	if _, ok := fields["limits"]; !ok {
+		t.Fatalf("marshaled Profile missing limits field in %s", data)
+	}
+	var limits map[string]json.RawMessage
+	if err := json.Unmarshal(fields["limits"], &limits); err != nil {
+		t.Fatalf("unmarshal limits: %v", err)
+	}
+	for _, name := range []string{"daily_token_budget", "weekly_token_budget", "monthly_usd_budget", "priority", "suggest_enabled", "rate_limit_cooldown"} {
+		if _, ok := limits[name]; !ok {
+			t.Errorf("marshaled ProfileLimits missing field %q in %s", name, fields["limits"])
+		}
+	}
+	for _, name := range []string{"DailyTokenBudget", "WeeklyTokenBudget", "MonthlyUSDBudget", "SuggestEnabled", "RateLimitCooldown"} {
+		if _, ok := limits[name]; ok {
+			t.Errorf("marshaled ProfileLimits included Go field name %q in %s", name, fields["limits"])
+		}
+	}
+}
+
+func TestTelemetryJSONUsesContractFieldNames(t *testing.T) {
+	ts := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	status := contracts.DaemonStatus{
+		PID:             1234,
+		Version:         "v0.1.0",
+		StartedAt:       ts,
+		Port:            17333,
+		URL:             "http://127.0.0.1:17333",
+		DBPath:          "/tmp/ccx.db",
+		LogPath:         "/tmp/ccx.log",
+		ProfilesWatched: 3,
+		Running:         true,
+	}
+
+	data, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("marshal DaemonStatus: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal DaemonStatus fields: %v", err)
+	}
+	for _, name := range []string{"pid", "version", "started_at", "port", "url", "db_path", "log_path", "profiles_watched", "running"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled DaemonStatus missing field %q in %s", name, data)
+		}
+	}
+
+	hook := contracts.HookEvent{
+		Profile:      "work",
+		Session:      "session-1",
+		Event:        "StopFailure",
+		Timestamp:    ts,
+		Transcript:   "/tmp/transcript.jsonl",
+		CWD:          "/repo",
+		Model:        "claude-opus-4-7",
+		Source:       "hook",
+		Permission:   "acceptEdits",
+		Reason:       "rate-limit",
+		Error:        "429",
+		ErrorDetails: "too many requests",
+		Trigger:      "stop",
+	}
+
+	data, err = json.Marshal(hook)
+	if err != nil {
+		t.Fatalf("marshal HookEvent: %v", err)
+	}
+	fields = map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal HookEvent fields: %v", err)
+	}
+	for _, name := range []string{"profile", "session", "event", "timestamp", "transcript", "cwd", "model", "source", "permission", "reason", "error", "error_details", "trigger"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled HookEvent missing field %q in %s", name, data)
+		}
+	}
+
+	session := contracts.SessionTelemetry{
+		Profile:        "work",
+		Session:        "session-1",
+		LastSeenAt:     ts,
+		Status:         "failed",
+		FailureError:   "429",
+		FailureDetails: "too many requests",
+		CompactCount:   1,
+	}
+	data, err = json.Marshal(session)
+	if err != nil {
+		t.Fatalf("marshal SessionTelemetry: %v", err)
+	}
+	fields = map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal SessionTelemetry fields: %v", err)
+	}
+	for _, name := range []string{"profile", "session", "last_seen_at", "status", "failure_error", "failure_details", "compact_count"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled SessionTelemetry missing field %q in %s", name, data)
+		}
+	}
+
+	health := contracts.ProfileHealth{Profile: "work", CheckedAt: ts, AuthStatus: "ok", AuthDetail: "valid"}
+	data, err = json.Marshal(health)
+	if err != nil {
+		t.Fatalf("marshal ProfileHealth: %v", err)
+	}
+	fields = map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal ProfileHealth fields: %v", err)
+	}
+	for _, name := range []string{"profile", "checked_at", "auth_status", "auth_detail"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled ProfileHealth missing field %q in %s", name, data)
+		}
+	}
+
+	rec := contracts.HeadroomRecommendation{
+		Profile:         "work",
+		Score:           0.92,
+		HeadroomPercent: 77.5,
+		Available:       true,
+		Reason:          "healthy",
+		CooldownUntil:   ts,
+		AuthStatus:      "ok",
+	}
+	data, err = json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal HeadroomRecommendation: %v", err)
+	}
+	fields = map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal HeadroomRecommendation fields: %v", err)
+	}
+	for _, name := range []string{"profile", "score", "headroom_percent", "available", "reason", "cooldown_until", "auth_status"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled HeadroomRecommendation missing field %q in %s", name, data)
+		}
+	}
+
+	q := contracts.SessionQuery{Profile: "work", Status: "failed", Since: ts, Limit: 5}
+	data, err = json.Marshal(q)
+	if err != nil {
+		t.Fatalf("marshal SessionQuery: %v", err)
+	}
+	fields = map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal SessionQuery fields: %v", err)
+	}
+	for _, name := range []string{"profile", "status", "since", "limit"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled SessionQuery missing field %q in %s", name, data)
+		}
 	}
 }
 

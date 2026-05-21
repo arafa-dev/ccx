@@ -76,7 +76,8 @@ func (m *Manager) Add(ctx context.Context, p contracts.Profile) error { //nolint
 		return err
 	}
 
-	for _, existing := range reg.Profiles {
+	for i := range reg.Profiles {
+		existing := &reg.Profiles[i]
 		if existing.Name == p.Name {
 			return fmt.Errorf("profile %q: %w", p.Name, contracts.ErrProfileAlreadyExists)
 		}
@@ -142,9 +143,9 @@ func (m *Manager) Get(ctx context.Context, name string) (contracts.Profile, erro
 	if err != nil {
 		return contracts.Profile{}, err
 	}
-	for _, p := range reg.Profiles {
-		if p.Name == name {
-			return p, nil
+	for i := range reg.Profiles {
+		if reg.Profiles[i].Name == name {
+			return reg.Profiles[i], nil
 		}
 	}
 	return contracts.Profile{}, fmt.Errorf("profile %q: %w", name, contracts.ErrProfileNotFound)
@@ -190,8 +191,8 @@ func (m *Manager) Remove(ctx context.Context, name string) error {
 	}
 
 	idx := -1
-	for i, p := range reg.Profiles {
-		if p.Name == name {
+	for i := range reg.Profiles {
+		if reg.Profiles[i].Name == name {
 			idx = i
 			break
 		}
@@ -228,8 +229,8 @@ func (m *Manager) MarkUsed(ctx context.Context, name string) error {
 	}
 
 	idx := -1
-	for i, p := range reg.Profiles {
-		if p.Name == name {
+	for i := range reg.Profiles {
+		if reg.Profiles[i].Name == name {
 			idx = i
 			break
 		}
@@ -239,6 +240,69 @@ func (m *Manager) MarkUsed(ctx context.Context, name string) error {
 	}
 
 	reg.Profiles[idx].LastUsedAt = time.Now().UTC()
+	if err := atomicWriteRegistry(m.Path(), reg); err != nil {
+		return fmt.Errorf("saving registry: %w", err)
+	}
+	return nil
+}
+
+// Update loads the named profile, lets fn mutate it, validates the result,
+// and rewrites the registry atomically. If fn returns an error the registry is
+// left unchanged.
+func (m *Manager) Update(ctx context.Context, name string, fn func(*contracts.Profile) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if name == "" {
+		return fmt.Errorf("profile: name is empty")
+	}
+	if fn == nil {
+		return fmt.Errorf("profile %q: update function is nil", name)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	reg, err := loadRegistry(m.Path())
+	if err != nil {
+		return err
+	}
+
+	idx := -1
+	for i := range reg.Profiles {
+		if reg.Profiles[i].Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("profile %q: %w", name, contracts.ErrProfileNotFound)
+	}
+
+	next := reg.Profiles[idx]
+	if err := fn(&next); err != nil {
+		return err
+	}
+	if next.Name != name {
+		return fmt.Errorf("profile %q: name cannot be changed to %q", name, next.Name)
+	}
+	if err := ValidateProfile(next); err != nil {
+		return err
+	}
+	for i := range reg.Profiles {
+		if i == idx {
+			continue
+		}
+		existing := &reg.Profiles[i]
+		if existing.ConfigDir == next.ConfigDir {
+			return fmt.Errorf("config_dir %q already used by profile %q: %w", next.ConfigDir, existing.Name, contracts.ErrConfigDirConflict)
+		}
+	}
+	if err := ensureConfigDir(next.ConfigDir); err != nil {
+		return fmt.Errorf("preparing config dir %q: %w", next.ConfigDir, err)
+	}
+
+	reg.Profiles[idx] = next
 	if err := atomicWriteRegistry(m.Path(), reg); err != nil {
 		return fmt.Errorf("saving registry: %w", err)
 	}
@@ -275,9 +339,9 @@ func (m *Manager) Active(ctx context.Context) (contracts.Profile, bool, error) {
 		if err != nil {
 			return contracts.Profile{}, false, err
 		}
-		for _, p := range reg.Profiles {
-			if p.ConfigDir == cfg {
-				return p, true, nil
+		for i := range reg.Profiles {
+			if reg.Profiles[i].ConfigDir == cfg {
+				return reg.Profiles[i], true, nil
 			}
 		}
 		return contracts.Profile{}, false, fmt.Errorf("CLAUDE_CONFIG_DIR=%q not in registry: %w", cfg, contracts.ErrNoActiveProfile)

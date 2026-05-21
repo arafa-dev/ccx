@@ -72,3 +72,58 @@ func TestValidateProfileNameRegex(t *testing.T) {
 		t.Fatalf("expected valid name, got %v", err)
 	}
 }
+
+func TestValidateProfileRejectsNegativeLimits(t *testing.T) {
+	tests := []struct {
+		name   string
+		limits contracts.ProfileLimits
+	}{
+		{"daily token budget", contracts.ProfileLimits{DailyTokenBudget: -1}},
+		{"weekly token budget", contracts.ProfileLimits{WeeklyTokenBudget: -1}},
+		{"monthly usd budget", contracts.ProfileLimits{MonthlyUSDBudget: -0.01}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := contracts.Profile{
+				Name:      "work",
+				ConfigDir: filepath.Join(t.TempDir(), "x"),
+				Limits:    tc.limits,
+			}
+			if err := profile.ValidateProfile(p); err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+		})
+	}
+}
+
+func TestValidateProfileRejectsInvalidRateLimitCooldown(t *testing.T) {
+	p := contracts.Profile{
+		Name:      "work",
+		ConfigDir: filepath.Join(t.TempDir(), "x"),
+		Limits: contracts.ProfileLimits{
+			RateLimitCooldown: "not-a-duration",
+		},
+	}
+	if err := profile.ValidateProfile(p); err == nil {
+		t.Fatal("expected validation error for invalid cooldown")
+	}
+}
+
+func TestValidateProfileAcceptsProfileLimits(t *testing.T) {
+	suggest := true
+	p := contracts.Profile{
+		Name:      "work",
+		ConfigDir: filepath.Join(t.TempDir(), "x"),
+		Limits: contracts.ProfileLimits{
+			DailyTokenBudget:  1000,
+			WeeklyTokenBudget: 7000,
+			MonthlyUSDBudget:  12.50,
+			Priority:          -10,
+			SuggestEnabled:    &suggest,
+			RateLimitCooldown: "15m",
+		},
+	}
+	if err := profile.ValidateProfile(p); err != nil {
+		t.Fatalf("expected valid limits, got %v", err)
+	}
+}

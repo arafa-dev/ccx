@@ -334,6 +334,59 @@ func TestMarkUsedMissingProfileReturnsSentinel(t *testing.T) {
 	}
 }
 
+func TestUpdateMutatesExistingProfileAtomically(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "work")
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	suggest := true
+	if err := mgr.Update(ctx, "work", func(p *contracts.Profile) error {
+		p.Label = "Work Account"
+		p.Limits = contracts.ProfileLimits{
+			DailyTokenBudget:  1000,
+			WeeklyTokenBudget: 7000,
+			MonthlyUSDBudget:  42.50,
+			Priority:          3,
+			SuggestEnabled:    &suggest,
+			RateLimitCooldown: "30m",
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, err := mgr.Get(ctx, "work")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Label != "Work Account" {
+		t.Errorf("Label = %q, want Work Account", got.Label)
+	}
+	if got.Limits.DailyTokenBudget != 1000 || got.Limits.WeeklyTokenBudget != 7000 ||
+		got.Limits.MonthlyUSDBudget != 42.50 || got.Limits.Priority != 3 ||
+		got.Limits.RateLimitCooldown != "30m" {
+		t.Errorf("Limits mismatch: %+v", got.Limits)
+	}
+	if got.Limits.SuggestEnabled == nil || !*got.Limits.SuggestEnabled {
+		t.Errorf("SuggestEnabled = %v, want pointer to true", got.Limits.SuggestEnabled)
+	}
+}
+
+func TestUpdateMissingProfileReturnsSentinel(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	err := mgr.Update(ctx, "ghost", func(p *contracts.Profile) error {
+		p.Label = "Nope"
+		return nil
+	})
+	if !errors.Is(err, contracts.ErrProfileNotFound) {
+		t.Fatalf("expected ErrProfileNotFound, got %v", err)
+	}
+}
+
 func TestActiveNoEnvReturnsNoActiveProfile(t *testing.T) {
 	t.Setenv("CCX_ACTIVE_PROFILE", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
