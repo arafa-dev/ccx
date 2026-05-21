@@ -276,7 +276,9 @@ func (e Evaluator) applyFailureGates(
 			until := failure.Timestamp.Add(cooldown)
 			if now.Before(until) {
 				c.Available = false
-				c.CooldownUntil = &until
+				if c.CooldownUntil == nil || until.After(*c.CooldownUntil) {
+					c.CooldownUntil = &until
+				}
 				c.Reasons = append(c.Reasons, "rate limit cooldown active")
 			} else {
 				penalty = max(penalty, 10)

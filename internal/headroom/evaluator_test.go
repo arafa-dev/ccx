@@ -80,7 +80,7 @@ func TestHeavilyOverBudgetProfilesRankByActualNegativeHeadroom(t *testing.T) {
 func TestRateLimitFailureInsideCooldownExcludesProfileAndReportsCooldown(t *testing.T) {
 	now := testNow()
 	store := newFakeStore(now)
-	store.addFailure("work", contracts.HookEvent{
+	store.addWorkFailure(contracts.HookEvent{
 		Event:     "StopFailure",
 		Timestamp: now.Add(-30 * time.Minute),
 		Error:     "rate_limit",
@@ -100,6 +100,31 @@ func TestRateLimitFailureInsideCooldownExcludesProfileAndReportsCooldown(t *test
 	}
 	if result.Recommendation != nil {
 		t.Fatalf("recommendation = %+v, want nil", result.Recommendation)
+	}
+}
+
+func TestRateLimitFailuresUseMaxActiveCooldownUntil(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	store.addWorkFailure(contracts.HookEvent{
+		Event:     "StopFailure",
+		Timestamp: now.Add(-30 * time.Minute),
+		Error:     "rate_limit",
+	})
+	store.addWorkFailure(contracts.HookEvent{
+		Event:     "StopFailure",
+		Timestamp: now.Add(-2 * time.Hour),
+		Error:     "rate_limit",
+	})
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("work", contracts.ProfileLimits{DailyTokenBudget: 1000, RateLimitCooldown: "3h"}),
+	})
+
+	got := mustCandidate(t, result, "work")
+	wantCooldown := now.Add(150 * time.Minute)
+	if got.CooldownUntil == nil || !got.CooldownUntil.Equal(wantCooldown) {
+		t.Fatalf("CooldownUntil = %v, want later active expiry %v", got.CooldownUntil, wantCooldown)
 	}
 }
 
@@ -136,7 +161,7 @@ func TestAuthenticationFailuresExcludeProfile(t *testing.T) {
 	for _, failure := range []string{"authentication_failed", "oauth_org_not_allowed"} {
 		t.Run(failure, func(t *testing.T) {
 			store := newFakeStore(now)
-			store.addFailure("work", contracts.HookEvent{
+			store.addWorkFailure(contracts.HookEvent{
 				Event:     "StopFailure",
 				Timestamp: now.Add(-time.Hour),
 				Error:     failure,
@@ -285,9 +310,9 @@ func (s *fakeStore) addUsage(profile string, at time.Time, model string, usage c
 	s.usage = append(s.usage, usageEvent{profile: profile, at: at, model: model, usage: usage})
 }
 
-func (s *fakeStore) addFailure(profile string, ev contracts.HookEvent) {
-	ev.Profile = profile
-	s.failures[profile] = append(s.failures[profile], ev)
+func (s *fakeStore) addWorkFailure(ev contracts.HookEvent) {
+	ev.Profile = "work"
+	s.failures["work"] = append(s.failures["work"], ev)
 }
 
 func (s *fakeStore) QueryUsage(_ context.Context, q contracts.UsageQuery) ([]contracts.UsageRow, error) {
