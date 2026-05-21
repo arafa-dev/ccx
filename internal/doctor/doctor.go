@@ -3,6 +3,7 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,6 +80,14 @@ func (d *Doctor) checkDefaultConfigDir() contracts.DoctorCheck {
 		}
 	}
 	if _, err := os.Stat(cfg); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return contracts.DoctorCheck{
+				Name:        "default Claude Code config dir",
+				Status:      "fail",
+				Detail:      fmt.Sprintf("cannot access %s: %v", cfg, err),
+				Remediation: "Verify directory permissions and accessibility.",
+			}
+		}
 		return contracts.DoctorCheck{
 			Name:        "default Claude Code config dir",
 			Status:      "warn",
@@ -113,14 +122,22 @@ func (d *Doctor) checkRegisteredProfiles(ctx context.Context) []contracts.Doctor
 	for _, p := range profiles {
 		status := "ok"
 		detail := p.ConfigDir
+		remediation := ""
 		if _, err := os.Stat(p.ConfigDir); err != nil {
-			status = "warn"
-			detail = fmt.Sprintf("config dir missing: %s", p.ConfigDir)
+			if errors.Is(err, os.ErrNotExist) {
+				status = "warn"
+				detail = fmt.Sprintf("config dir missing: %s", p.ConfigDir)
+			} else {
+				status = "fail"
+				detail = fmt.Sprintf("cannot access config dir %s: %v", p.ConfigDir, err)
+				remediation = "Verify directory permissions and accessibility."
+			}
 		}
 		out = append(out, contracts.DoctorCheck{
-			Name:   "profile: " + p.Name,
-			Status: status,
-			Detail: detail,
+			Name:        "profile: " + p.Name,
+			Status:      status,
+			Detail:      detail,
+			Remediation: remediation,
 		})
 	}
 	return out
