@@ -43,6 +43,12 @@ func newHooksInstallCmd() *cobra.Command {
 
 			svc := &hookspkg.Service{Profiles: deps.Profiles, Store: deps.Store}
 			results, err := svc.Install(ctx, hookspkg.InstallOptions{Profile: profileFlag, Force: force})
+			if err != nil && asJSON && len(results) == 0 {
+				if encErr := writeHookErrorJSON(c.OutOrStdout(), profileFlag, err); encErr != nil {
+					return encErr
+				}
+				return err
+			}
 			if asJSON {
 				if encErr := writeHookResultsJSON(c.OutOrStdout(), results); encErr != nil {
 					return encErr
@@ -80,6 +86,11 @@ func newHooksStatusCmd() *cobra.Command {
 			svc := &hookspkg.Service{Profiles: deps.Profiles, Store: deps.Store}
 			results, err := svc.Status(ctx, hookspkg.StatusOptions{Profile: profileFlag})
 			if err != nil {
+				if asJSON {
+					if encErr := writeHookErrorJSON(c.OutOrStdout(), profileFlag, err); encErr != nil {
+						return encErr
+					}
+				}
 				return err
 			}
 			if asJSON {
@@ -111,6 +122,12 @@ func newHooksUninstallCmd() *cobra.Command {
 
 			svc := &hookspkg.Service{Profiles: deps.Profiles, Store: deps.Store}
 			results, err := svc.Uninstall(ctx, hookspkg.UninstallOptions{Profile: profileFlag})
+			if err != nil && asJSON && len(results) == 0 {
+				if encErr := writeHookErrorJSON(c.OutOrStdout(), profileFlag, err); encErr != nil {
+					return encErr
+				}
+				return err
+			}
 			if asJSON {
 				if encErr := writeHookResultsJSON(c.OutOrStdout(), results); encErr != nil {
 					return encErr
@@ -160,6 +177,17 @@ func newHooksRecordCmd() *cobra.Command {
 func writeHookResultsJSON(w io.Writer, results []hookspkg.Result) error {
 	enc := json.NewEncoder(w)
 	return enc.Encode(results)
+}
+
+func writeHookErrorJSON(w io.Writer, profile string, err error) error {
+	enc := json.NewEncoder(w)
+	return enc.Encode(hookspkg.Result{
+		Profile:   profile,
+		Status:    hookspkg.StatusInvalid,
+		Message:   "hooks command failed",
+		Error:     err.Error(),
+		Installed: false,
+	})
 }
 
 func renderHookResults(w io.Writer, results []hookspkg.Result) error {

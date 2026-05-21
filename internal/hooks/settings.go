@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -210,6 +211,13 @@ func loadSettings(path string) (settings map[string]any, existed bool, err error
 	if err := dec.Decode(&settings); err != nil {
 		return nil, true, fmt.Errorf("parsing settings %q: %w", path, err)
 	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, true, fmt.Errorf("parsing settings %q: trailing JSON data", path)
+		}
+		return nil, true, fmt.Errorf("parsing settings %q: %w", path, err)
+	}
 	if settings == nil {
 		return nil, true, fmt.Errorf("parsing settings %q: root must be a JSON object", path)
 	}
@@ -238,7 +246,7 @@ func installManagedHooks(settings map[string]any, profile, binary string, force 
 				changed = true
 			}
 		}
-		if hasManagedHandler(groups, profile) {
+		if hasManagedHandlerInRequiredGroup(groups, spec, profile) {
 			continue
 		}
 		groups, err = addManagedHandler(groups, spec, managedHook(binary, profile))
@@ -404,26 +412,6 @@ func handlersArray(group map[string]any, create bool) ([]any, error) {
 	return handlers, nil
 }
 
-func hasManagedHandler(groups []any, profile string) bool {
-	for _, rawGroup := range groups {
-		group, ok := rawGroup.(map[string]any)
-		if !ok {
-			continue
-		}
-		handlers, err := handlersArray(group, false)
-		if err != nil {
-			continue
-		}
-		for _, rawHandler := range handlers {
-			handler, ok := rawHandler.(map[string]any)
-			if ok && isManagedHandler(handler, profile) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func hasManagedHandlerInRequiredGroup(groups []any, spec hookSpec, profile string) bool {
 	for _, rawGroup := range groups {
 		group, ok := rawGroup.(map[string]any)
@@ -467,11 +455,12 @@ func isManagedHandler(handler map[string]any, profile string) bool {
 	if !ok || hookType != "command" {
 		return false
 	}
-	if _, ok := stringFromAny(handler["command"]); !ok {
+	command, ok := stringFromAny(handler["command"])
+	if !ok || command == "" || !filepath.IsAbs(command) {
 		return false
 	}
 	args, ok := stringsFromAny(handler["args"])
-	if !ok || len(args) < 4 {
+	if !ok || len(args) != 4 {
 		return false
 	}
 	prefix := []string{"hooks", "record", "--profile", profile}
@@ -479,6 +468,14 @@ func isManagedHandler(handler map[string]any, profile string) bool {
 		if args[i] != want {
 			return false
 		}
+	}
+	timeout, ok := intFromAny(handler["timeout"])
+	if !ok || timeout != 5 {
+		return false
+	}
+	statusMessage, ok := stringFromAny(handler["statusMessage"])
+	if !ok || statusMessage != "ccx telemetry" {
+		return false
 	}
 	return true
 }
@@ -502,6 +499,28 @@ func stringsFromAny(v any) ([]string, bool) {
 		out[i] = s
 	}
 	return out, true
+}
+
+func intFromAny(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		if n != float64(int(n)) {
+			return 0, false
+		}
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(i), true
+	default:
+		return 0, false
+	}
 }
 
 func writeSettings(path string, settings map[string]any, existed bool, now time.Time) (string, error) {

@@ -84,6 +84,38 @@ func TestHooksInstallRejectsMissingProfile(t *testing.T) {
 	}
 }
 
+func TestHooksJSONErrorsIncludeStablePayload(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	for _, args := range [][]string{
+		{"hooks", "status", "--profile", "missing", "--json"},
+		{"hooks", "install", "--profile", "missing", "--json"},
+		{"hooks", "uninstall", "--profile", "missing", "--json"},
+	} {
+		t.Run(strings.Join(args[:2], "-"), func(t *testing.T) {
+			stdout, stderr, code := runCLIResult(args)
+			if code == 0 {
+				t.Fatalf("expected non-zero exit for %v", args)
+			}
+			if stdout == "" || stdout == "null\n" {
+				t.Fatalf("stdout = %q, want stable JSON error payload; stderr=%q", stdout, stderr)
+			}
+			payload := decodeHookError(t, stdout)
+			if payload.Profile != "missing" {
+				t.Fatalf("profile = %q, want missing in payload %#v", payload.Profile, payload)
+			}
+			if payload.Error == "" || !strings.Contains(payload.Error, "missing") {
+				t.Fatalf("error = %q, want missing profile error", payload.Error)
+			}
+			if payload.Message == "" {
+				t.Fatalf("message empty in payload %#v", payload)
+			}
+		})
+	}
+}
+
 func TestHooksRecordStoresTelemetryWithoutDaemon(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -171,6 +203,15 @@ func decodeHookResults(t *testing.T, out string) []hooks.Result {
 		t.Fatalf("invalid hook JSON: %v\n%s", err, out)
 	}
 	return results
+}
+
+func decodeHookError(t *testing.T, out string) hooks.Result {
+	t.Helper()
+	var result hooks.Result
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("invalid hook error JSON: %v\n%s", err, out)
+	}
+	return result
 }
 
 func writeCLITestFile(t *testing.T, path, content string) {

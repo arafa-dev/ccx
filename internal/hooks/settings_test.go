@@ -198,6 +198,37 @@ func TestInstallInvalidJSONFailsWithoutChangingFile(t *testing.T) {
 	}
 }
 
+func TestTrailingJSONFailsWithoutChangingFile(t *testing.T) {
+	ctx := context.Background()
+	profile := testProfile(t, "work")
+	path := filepath.Join(profile.ConfigDir, "settings.json")
+	original := `{"theme":"dark"} garbage`
+	writeFile(t, path, original)
+	svc := testService(profile)
+
+	if _, err := svc.Install(ctx, InstallOptions{}); err == nil {
+		t.Fatalf("Install succeeded, want trailing JSON error")
+	}
+	assertFileContent(t, path, original)
+	assertNoBackups(t, profile.ConfigDir)
+
+	if _, err := svc.Uninstall(ctx, UninstallOptions{}); err == nil {
+		t.Fatalf("Uninstall succeeded, want trailing JSON error")
+	}
+	assertFileContent(t, path, original)
+	assertNoBackups(t, profile.ConfigDir)
+
+	results, err := svc.Status(ctx, StatusOptions{})
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if len(results) != 1 || results[0].Status != StatusInvalid || results[0].Error == "" {
+		t.Fatalf("status results = %+v, want invalid result with error", results)
+	}
+	assertFileContent(t, path, original)
+	assertNoBackups(t, profile.ConfigDir)
+}
+
 func TestUninstallRemovesOnlyManagedHooks(t *testing.T) {
 	ctx := context.Background()
 	profile := testProfile(t, "work")
@@ -209,7 +240,7 @@ func TestUninstallRemovesOnlyManagedHooks(t *testing.T) {
       {
         "hooks": [
           {"type": "command", "command": "/usr/local/bin/user-stop"},
-          {"type": "command", "command": "/old/ccx", "args": ["hooks", "record", "--profile", "work"], "timeout": 5}
+          {"type": "command", "command": "/old/ccx", "args": ["hooks", "record", "--profile", "work"], "timeout": 5, "statusMessage": "ccx telemetry"}
         ]
       }
     ],
@@ -217,7 +248,7 @@ func TestUninstallRemovesOnlyManagedHooks(t *testing.T) {
       {
         "matcher": "startup|resume|clear|compact",
         "hooks": [
-          {"type": "command", "command": "/old/ccx", "args": ["hooks", "record", "--profile", "work"], "timeout": 5}
+          {"type": "command", "command": "/old/ccx", "args": ["hooks", "record", "--profile", "work"], "timeout": 5, "statusMessage": "ccx telemetry"}
         ]
       }
     ]
@@ -248,6 +279,86 @@ func TestUninstallRemovesOnlyManagedHooks(t *testing.T) {
 	}
 }
 
+func TestUninstallPreservesManagedLookingUserHooks(t *testing.T) {
+	ctx := context.Background()
+	profile := testProfile(t, "work")
+	path := filepath.Join(profile.ConfigDir, "settings.json")
+	original := `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {"type": "command", "command": "/usr/local/bin/user-extra", "args": ["hooks", "record", "--profile", "work", "--user-extra"], "timeout": 5, "statusMessage": "ccx telemetry"},
+          {"type": "command", "command": "/usr/local/bin/user-no-timeout", "args": ["hooks", "record", "--profile", "work"], "statusMessage": "ccx telemetry"},
+          {"type": "command", "command": "/usr/local/bin/user-no-status", "args": ["hooks", "record", "--profile", "work"], "timeout": 5}
+        ]
+      }
+    ]
+  }
+}`
+	writeFile(t, path, original)
+	svc := testService(profile)
+
+	statusResults, err := svc.Status(ctx, StatusOptions{})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(statusResults) != 1 || statusResults[0].Status != StatusPartial || statusResults[0].Installed {
+		t.Fatalf("status results = %+v, want partial/not installed", statusResults)
+	}
+
+	uninstallResults, err := svc.Uninstall(ctx, UninstallOptions{})
+	if err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	if len(uninstallResults) != 1 || uninstallResults[0].BackupPath != "" {
+		t.Fatalf("uninstall results = %+v, want no backup when preserving user hooks", uninstallResults)
+	}
+	assertFileContent(t, path, original)
+	assertNoBackups(t, profile.ConfigDir)
+}
+
+func TestInstallAddsRequiredMatcherWhenManagedHookExistsUnderWrongMatcher(t *testing.T) {
+	ctx := context.Background()
+	profile := testProfile(t, "work")
+	path := filepath.Join(profile.ConfigDir, "settings.json")
+	writeFile(t, path, `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "wrong",
+        "hooks": [
+          {"type": "command", "command": "/old/ccx", "args": ["hooks", "record", "--profile", "work"], "timeout": 5, "statusMessage": "ccx telemetry"}
+        ]
+      }
+    ]
+  }
+}`)
+	svc := testService(profile)
+
+	if _, err := svc.Install(ctx, InstallOptions{}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	settings := readSettings(t, path)
+	groups := hookGroups(t, settings, "SessionStart")
+	var (
+		foundWrong    bool
+		foundRequired bool
+	)
+	for _, group := range groups {
+		switch stringValue(t, group["matcher"]) {
+		case "wrong":
+			foundWrong = true
+		case "startup|resume|clear|compact":
+			foundRequired = countManagedWork(hookHandlers(t, group)) == 1
+		}
+	}
+	if !foundWrong || !foundRequired {
+		t.Fatalf("SessionStart groups = %+v, want wrong matcher preserved and required matcher added", groups)
+	}
+}
+
 func TestStatusReportsMissingPartialInstalledAndInvalid(t *testing.T) {
 	ctx := context.Background()
 	missing := testProfile(t, "missing")
@@ -261,7 +372,7 @@ func TestStatusReportsMissingPartialInstalledAndInvalid(t *testing.T) {
       {
         "matcher": "startup|resume|clear|compact",
         "hooks": [
-          {"type": "command", "command": "/bin/ccx-test", "args": ["hooks", "record", "--profile", "partial"], "timeout": 5}
+          {"type": "command", "command": "/bin/ccx-test", "args": ["hooks", "record", "--profile", "partial"], "timeout": 5, "statusMessage": "ccx telemetry"}
         ]
       }
     ]
@@ -361,6 +472,28 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path) //nolint:gosec // test reads a settings file under t.TempDir.
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("file content = %q, want %q", got, want)
+	}
+}
+
+func assertNoBackups(t *testing.T, configDir string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(configDir, "settings.json.ccx-backup-*"))
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("backup files = %v, want none", matches)
+	}
+}
+
 func readSettings(t *testing.T, path string) map[string]json.RawMessage {
 	t.Helper()
 	data, err := os.ReadFile(path) //nolint:gosec // test reads a path supplied by test setup.
@@ -430,6 +563,19 @@ func assertManagedHandler(t *testing.T, handler map[string]json.RawMessage, bina
 func managedHandlers(handlers []map[string]json.RawMessage, profile string) []map[string]json.RawMessage {
 	var out []map[string]json.RawMessage
 	for _, handler := range handlers {
+		command := stringValueNoFatal(handler["command"])
+		if command == "" || !filepath.IsAbs(command) {
+			continue
+		}
+		if stringValueNoFatal(handler["type"]) != "command" {
+			continue
+		}
+		if intValueNoFatal(handler["timeout"]) != 5 {
+			continue
+		}
+		if stringValueNoFatal(handler["statusMessage"]) != "ccx telemetry" {
+			continue
+		}
 		var args []string
 		if err := json.Unmarshal(handler["args"], &args); err != nil {
 			continue
@@ -496,6 +642,28 @@ func intValue(t *testing.T, raw json.RawMessage) int {
 	var out int
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("Unmarshal int %s: %v", raw, err)
+	}
+	return out
+}
+
+func stringValueNoFatal(raw json.RawMessage) string {
+	var out string
+	if len(raw) == 0 {
+		return ""
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return ""
+	}
+	return out
+}
+
+func intValueNoFatal(raw json.RawMessage) int {
+	var out int
+	if len(raw) == 0 {
+		return 0
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return 0
 	}
 	return out
 }
