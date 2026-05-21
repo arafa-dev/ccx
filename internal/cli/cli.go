@@ -75,6 +75,7 @@ func newRootCommand(opts *Options) *cobra.Command {
 		newUseCommand(opts),
 		newInitCommand(opts),
 		newUsageCommand(opts),
+		newSuggestCommand(opts),
 		newDashboardCommand(opts),
 		newDoctorCommand(opts),
 		newHooksCommand(opts),
