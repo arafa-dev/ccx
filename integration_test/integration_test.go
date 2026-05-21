@@ -118,10 +118,16 @@ func waitForHealth(url string) (*http.Response, error) {
 	var lastErr error
 	for time.Now().Before(deadline) {
 		res, err := client.Get(url)
-		if err == nil {
+		if err == nil && res.StatusCode == http.StatusOK {
 			return res, nil
 		}
-		lastErr = err
+		if res != nil {
+			lastErr = fmt.Errorf("status %d", res.StatusCode)
+			_ = res.Body.Close()
+		}
+		if err != nil {
+			lastErr = err
+		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("timed out waiting for %s: %w", url, lastErr)
