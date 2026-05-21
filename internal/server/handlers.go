@@ -32,7 +32,11 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("query usage for profile %q: %w", p.Name, err))
 			return
 		}
-		usage, cost := aggregate(s.deps.Pricing, rows)
+		usage, cost, err := aggregate(s.deps.Pricing, rows)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("pricing for profile %q: %w", p.Name, err))
+			return
+		}
 		out = append(out, map[string]any{
 			"name":         p.Name,
 			"config_dir":   p.ConfigDir,
@@ -68,7 +72,11 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range rows {
-		cost, _ := s.deps.Pricing.Cost(rows[i].Model, rows[i].Day, rows[i].Usage)
+		cost, err := s.deps.Pricing.Cost(rows[i].Model, rows[i].Day, rows[i].Usage)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("pricing error: %w", err))
+			return
+		}
 		rows[i].EstimatedUSD = cost
 	}
 	total := totalUsage(rows)
@@ -122,13 +130,16 @@ func parseSinceParam(s string) (time.Duration, error) {
 	return 0, fmt.Errorf("invalid since: %q", s)
 }
 
-func aggregate(p contracts.PricingTable, rows []contracts.UsageRow) (usage contracts.Usage, cost float64) {
+func aggregate(p contracts.PricingTable, rows []contracts.UsageRow) (usage contracts.Usage, cost float64, err error) {
 	for _, r := range rows {
 		usage = usage.Add(r.Usage)
-		rowCost, _ := p.Cost(r.Model, r.Day, r.Usage)
+		rowCost, err := p.Cost(r.Model, r.Day, r.Usage)
+		if err != nil {
+			return usage, cost, err
+		}
 		cost += rowCost
 	}
-	return usage, cost
+	return usage, cost, nil
 }
 
 func totalUsage(rows []contracts.UsageRow) map[string]any {

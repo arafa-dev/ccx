@@ -69,6 +69,74 @@ func TestProfilesEndpointReportsUsageQueryErrors(t *testing.T) {
 	}
 }
 
+func TestProfilesEndpointReportsPricingErrors(t *testing.T) {
+	srv := server.New(server.Deps{
+		Store: &mockStore{queryRows: []contracts.UsageRow{{
+			Model: "model-a",
+			Day:   time.Now().UTC(),
+			Usage: contracts.Usage{InputTokens: 1},
+		}}},
+		Pricing: &mockPricing{err: errors.New("pricing unavailable")},
+		Profiles: mockProfiles{profiles: []contracts.Profile{{
+			Name:      "demo",
+			ConfigDir: "/tmp/demo",
+		}}},
+	}, "test")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	res, err := ts.Client().Get(ts.URL + "/api/profiles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusInternalServerError)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(body.Error, "pricing for profile \"demo\"") ||
+		!strings.Contains(body.Error, "pricing unavailable") {
+		t.Fatalf("error = %q", body.Error)
+	}
+}
+
+func TestUsageEndpointReportsPricingErrors(t *testing.T) {
+	srv := server.New(server.Deps{
+		Store: &mockStore{queryRows: []contracts.UsageRow{{
+			Model: "model-a",
+			Day:   time.Now().UTC(),
+			Usage: contracts.Usage{InputTokens: 1},
+		}}},
+		Pricing: &mockPricing{err: errors.New("pricing unavailable")},
+	}, "test")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	res, err := ts.Client().Get(ts.URL + "/api/usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusInternalServerError)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(body.Error, "pricing error") ||
+		!strings.Contains(body.Error, "pricing unavailable") {
+		t.Fatalf("error = %q", body.Error)
+	}
+}
+
 type mockStore struct {
 	contracts.Store
 	queryRows []contracts.UsageRow
@@ -83,10 +151,13 @@ func (m *mockStore) QueryUsage(_ context.Context, _ contracts.UsageQuery) ([]con
 	return m.queryRows, m.queryErr
 }
 
-type mockPricing struct{}
+type mockPricing struct {
+	cost float64
+	err  error
+}
 
 func (m *mockPricing) Cost(_ string, _ time.Time, _ contracts.Usage) (float64, error) {
-	return 0, nil
+	return m.cost, m.err
 }
 
 func (m *mockPricing) LastUpdated() time.Time { return time.Time{} }
