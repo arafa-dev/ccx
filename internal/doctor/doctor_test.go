@@ -21,12 +21,26 @@ func TestRunReturnsChecks(t *testing.T) {
 	if len(checks) == 0 {
 		t.Error("expected at least one check")
 	}
+	expectedNames := map[string]bool{
+		"claude on PATH":                 false,
+		"ccx home directory":             false,
+		"default Claude Code config dir": false,
+		"shell integration":              false,
+	}
 	for _, c := range checks {
 		if c.Name == "" {
 			t.Errorf("check has empty name: %+v", c)
 		}
 		if c.Status != "ok" && c.Status != "warn" && c.Status != "fail" {
 			t.Errorf("invalid status: %q", c.Status)
+		}
+		if _, ok := expectedNames[c.Name]; ok {
+			expectedNames[c.Name] = true
+		}
+	}
+	for name, found := range expectedNames {
+		if !found {
+			t.Errorf("missing expected check %q", name)
 		}
 	}
 }
