@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
@@ -8,6 +9,18 @@ import (
 )
 
 func TestPickProfileNoTTYReturnsFirst(t *testing.T) {
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+		_ = w.Close()
+	})
+
 	got, err := tui.PickProfile([]contracts.Profile{
 		{Name: "work", ConfigDir: "/tmp/w"},
 		{Name: "personal", ConfigDir: "/tmp/p"},
