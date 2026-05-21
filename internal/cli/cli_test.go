@@ -20,7 +20,7 @@ func TestExecuteHelpShowsAllCommands(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("--help exit=%d stderr=%q", code, stderr.String())
 	}
-	want := []string{"profile", "use", "init", "usage", "suggest", "dashboard", "doctor", "version"}
+	want := []string{"profile", "use", "init", "usage", "suggest", "dashboard", "daemon", "doctor", "version"}
 	got := stdout.String()
 	for _, w := range want {
 		if !strings.Contains(got, w) {

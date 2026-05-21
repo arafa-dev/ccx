@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/arafa-dev/ccx/internal/daemon"
 	"github.com/arafa-dev/ccx/internal/dashboard"
 	"github.com/arafa-dev/ccx/internal/server"
 	"github.com/spf13/cobra"
@@ -14,15 +15,32 @@ import (
 
 func newDashboardCommand(opts *Options) *cobra.Command {
 	var (
-		port   int
-		noOpen bool
+		port       int
+		noOpen     bool
+		daemonMode bool
 	)
 	cmd := &cobra.Command{
 		Use:   "dashboard",
 		Short: "Open the local dashboard",
 		RunE: func(c *cobra.Command, _ []string) error {
-			if port != 0 && (port < 1 || port > 65535) {
-				return fmt.Errorf("invalid --port %d: must be in range 1-65535", port)
+			if err := validatePort(port); err != nil {
+				return err
+			}
+
+			ctrl := daemonController(opts)
+			status, err := ctrl.Status(c.Context())
+			if err != nil {
+				return err
+			}
+			if status.Running {
+				return openOrPrintDashboard(c, opts, status.URL, noOpen)
+			}
+			if daemonMode {
+				result, err := ctrl.StartDetached(c.Context(), daemon.StartOptions{Port: port})
+				if err != nil {
+					return err
+				}
+				return openOrPrintDashboard(c, opts, result.Status.URL, noOpen)
 			}
 
 			ctx := c.Context()
@@ -66,7 +84,7 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 			if !noOpen {
 				go func() {
 					time.Sleep(300 * time.Millisecond)
-					_ = openBrowser(url)
+					_ = browserOpener(opts)(url)
 				}()
 			}
 			return runFn()
@@ -74,7 +92,23 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&port, "port", 0, "port (default: pick next free in 7777-7787)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open a browser")
+	cmd.Flags().BoolVar(&daemonMode, "daemon", false, "start or use the background daemon")
 	return cmd
+}
+
+func openOrPrintDashboard(c *cobra.Command, opts *Options, url string, noOpen bool) error {
+	_, _ = fmt.Fprintf(c.OutOrStdout(), "ccx dashboard at %s\n", url)
+	if !noOpen {
+		return browserOpener(opts)(url)
+	}
+	return nil
+}
+
+func browserOpener(opts *Options) func(string) error {
+	if opts.OpenBrowser != nil {
+		return opts.OpenBrowser
+	}
+	return openBrowser
 }
 
 func openBrowser(url string) error {

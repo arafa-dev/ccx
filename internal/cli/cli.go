@@ -3,10 +3,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 
+	"github.com/arafa-dev/ccx/internal/daemon"
 	"github.com/spf13/cobra"
 )
 
@@ -19,11 +21,15 @@ type BuildInfo struct {
 
 // Options configures a single Run invocation, used by tests and main.
 type Options struct {
-	Args   []string
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-	Build  BuildInfo
+	Args          []string
+	Stdin         io.Reader
+	Stdout        io.Writer
+	Stderr        io.Writer
+	Build         BuildInfo
+	DaemonRoot    string
+	DaemonProcess daemon.ProcessManager
+	Executable    string
+	OpenBrowser   func(string) error
 }
 
 // Execute is the production entry point using os.Args and os.Stdin/out/err.
@@ -55,10 +61,25 @@ func Run(ctx context.Context, opts Options) int {
 		root.SetIn(opts.Stdin)
 	}
 	if err := root.ExecuteContext(ctx); err != nil {
-		_, _ = fmt.Fprintf(opts.Stderr, "Error: %s\n", err)
+		var structured *structuredCLIError
+		if !errors.As(err, &structured) {
+			_, _ = fmt.Fprintf(opts.Stderr, "Error: %s\n", err)
+		}
 		return 1
 	}
 	return 0
+}
+
+type structuredCLIError struct {
+	err error
+}
+
+func (e *structuredCLIError) Error() string {
+	return e.err.Error()
+}
+
+func (e *structuredCLIError) Unwrap() error {
+	return e.err
 }
 
 func newRootCommand(opts *Options) *cobra.Command {
@@ -77,6 +98,7 @@ func newRootCommand(opts *Options) *cobra.Command {
 		newUsageCommand(opts),
 		newSuggestCommand(opts),
 		newDashboardCommand(opts),
+		newDaemonCommand(opts),
 		newDoctorCommand(opts),
 		newHooksCommand(opts),
 	)
