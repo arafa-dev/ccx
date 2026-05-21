@@ -137,6 +137,23 @@ func TestUsageEndpointReportsPricingErrors(t *testing.T) {
 	}
 }
 
+func TestUsageEndpointRejectsNonPositiveSince(t *testing.T) {
+	srv := server.New(server.Deps{Store: &mockStore{}, Pricing: &mockPricing{}}, "test")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	for _, since := range []string{"0", "0d", "-1h"} {
+		res, err := ts.Client().Get(ts.URL + "/api/usage?since=" + since)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("since=%s status = %d, want %d", since, res.StatusCode, http.StatusBadRequest)
+		}
+	}
+}
+
 type mockStore struct {
 	contracts.Store
 	queryRows []contracts.UsageRow

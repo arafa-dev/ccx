@@ -119,11 +119,17 @@ func parseSinceParam(s string) (time.Duration, error) {
 		return 24 * time.Hour, nil
 	}
 	if d, err := time.ParseDuration(s); err == nil {
+		if d <= 0 {
+			return 0, fmt.Errorf("since must be > 0")
+		}
 		return d, nil
 	}
 	if strings.HasSuffix(s, "d") {
 		var n int
 		if _, err := fmt.Sscanf(s, "%dd", &n); err == nil {
+			if n <= 0 {
+				return 0, fmt.Errorf("since must be > 0")
+			}
 			return time.Duration(n) * 24 * time.Hour, nil
 		}
 	}
