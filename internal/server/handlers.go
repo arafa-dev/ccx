@@ -24,10 +24,14 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UTC().Truncate(24 * time.Hour)
 	out := make([]map[string]any, 0, len(profiles))
 	for _, p := range profiles {
-		rows, _ := s.deps.Store.QueryUsage(ctx, contracts.UsageQuery{
+		rows, err := s.deps.Store.QueryUsage(ctx, contracts.UsageQuery{
 			Profile: p.Name,
 			Range:   contracts.TimeRange{Start: start, End: start.Add(24 * time.Hour)},
 		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("query usage for profile %q: %w", p.Name, err))
+			return
+		}
 		usage, cost := aggregate(s.deps.Pricing, rows)
 		out = append(out, map[string]any{
 			"name":         p.Name,
