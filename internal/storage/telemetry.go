@@ -81,43 +81,48 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 	}
 
 	ts := unixNano(event.Timestamp)
-	if found && ts <= rec.LastSeenAt {
-		applyReplayOnly(&rec, &event, ts)
-		if err := saveSessionRecord(ctx, tx, &rec); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit session replay for %q/%q: %w", profileName, event.Session, err)
-		}
-		return nil
+	isNewer := !found || ts > rec.LastSeenAt
+	if isNewer {
+		rec.LastSeenAt = ts
 	}
 
-	rec.LastSeenAt = ts
-	mergeEventMetadata(&rec, &event)
+	mergeEventMetadata(&rec, &event, isNewer)
 	switch event.Event {
 	case "SessionStart":
-		if !rec.StartedAt.Valid {
+		if !rec.StartedAt.Valid || (ts != 0 && ts < rec.StartedAt.Int64) {
 			rec.StartedAt = sql.NullInt64{Int64: ts, Valid: true}
 		}
 		if !isTerminalSessionStatus(rec.Status) {
 			rec.Status = "running"
 		}
 	case "Stop":
-		rec.Status = "completed"
-		rec.FailureError = ""
-		rec.FailureDetails = ""
+		if rec.Status != "failed" {
+			rec.Status = "completed"
+			rec.FailureError = ""
+			rec.FailureDetails = ""
+		}
 	case "StopFailure":
 		rec.Status = "failed"
-		rec.FailureError = event.Error
-		rec.FailureDetails = event.ErrorDetails
+		if event.Error != "" || rec.FailureError == "" {
+			rec.FailureError = event.Error
+		}
+		if event.ErrorDetails != "" || rec.FailureDetails == "" {
+			rec.FailureDetails = event.ErrorDetails
+		}
 	case "SessionEnd":
-		rec.EndedAt = sql.NullInt64{Int64: ts, Valid: true}
+		if !rec.EndedAt.Valid || ts > rec.EndedAt.Int64 {
+			rec.EndedAt = sql.NullInt64{Int64: ts, Valid: true}
+			rec.EndReason = event.Reason
+		} else if rec.EndReason == "" {
+			rec.EndReason = event.Reason
+		}
 		if rec.Status != "failed" {
 			rec.Status = "ended"
 		}
-		rec.EndReason = event.Reason
 	case "PreCompact":
 	case "PostCompact":
+		// The session aggregate has no hook event id, so compaction is counted
+		// once per observed PostCompact payload, including replays.
 		rec.CompactCount++
 	default:
 		if rec.Status == "" {
@@ -411,27 +416,21 @@ ON CONFLICT(profile_name, session_id) DO UPDATE SET
 	return nil
 }
 
-func mergeEventMetadata(rec *sessionRecord, event *contracts.HookEvent) {
-	if event.Transcript != "" {
+func mergeEventMetadata(rec *sessionRecord, event *contracts.HookEvent, overwrite bool) {
+	if event.Transcript != "" && (overwrite || rec.TranscriptPath == "") {
 		rec.TranscriptPath = event.Transcript
 	}
-	if event.CWD != "" {
+	if event.CWD != "" && (overwrite || rec.CWD == "") {
 		rec.CWD = event.CWD
 	}
-	if event.Model != "" {
+	if event.Model != "" && (overwrite || rec.Model == "") {
 		rec.Model = event.Model
 	}
-	if event.Source != "" {
+	if event.Source != "" && (overwrite || rec.Source == "") {
 		rec.Source = event.Source
 	}
-	if event.Permission != "" {
+	if event.Permission != "" && (overwrite || rec.PermissionMode == "") {
 		rec.PermissionMode = event.Permission
-	}
-}
-
-func applyReplayOnly(rec *sessionRecord, event *contracts.HookEvent, ts int64) {
-	if event.Event == "SessionStart" && !rec.StartedAt.Valid {
-		rec.StartedAt = sql.NullInt64{Int64: ts, Valid: true}
 	}
 }
 

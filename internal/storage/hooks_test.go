@@ -206,6 +206,151 @@ func TestUpsertSessionTelemetryOutOfOrderStartPreservesFailedStatus(t *testing.T
 	if got[0].FailureError != "429" || got[0].FailureDetails != "rate limited" {
 		t.Errorf("failure fields = (%q, %q), want (429, rate limited)", got[0].FailureError, got[0].FailureDetails)
 	}
+	if got[0].Model != "claude-opus-4-7" {
+		t.Errorf("Model = %q, want claude-opus-4-7 from late SessionStart", got[0].Model)
+	}
+}
+
+func TestUpsertSessionTelemetryLateStopFailurePreservesEndFields(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 12, 30, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "SessionEnd",
+		Timestamp: start.Add(2 * time.Minute),
+		Reason:    "turn-complete",
+	}); err != nil {
+		t.Fatalf("SessionEnd: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(time.Minute),
+		Error:        "429",
+		ErrorDetails: "rate limited",
+	}); err != nil {
+		t.Fatalf("late StopFailure: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "failed" {
+		t.Errorf("Status = %q, want failed", got[0].Status)
+	}
+	if got[0].FailureError != "429" || got[0].FailureDetails != "rate limited" {
+		t.Errorf("failure fields = (%q, %q), want (429, rate limited)", got[0].FailureError, got[0].FailureDetails)
+	}
+	if !got[0].EndedAt.Equal(start.Add(2 * time.Minute)) {
+		t.Errorf("EndedAt = %v, want %v", got[0].EndedAt, start.Add(2*time.Minute))
+	}
+	if got[0].EndReason != "turn-complete" {
+		t.Errorf("EndReason = %q, want turn-complete", got[0].EndReason)
+	}
+	if !got[0].LastSeenAt.Equal(start.Add(2 * time.Minute)) {
+		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(2*time.Minute))
+	}
+}
+
+func TestUpsertSessionTelemetryLateSessionEndPreservesFailedStatus(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 12, 40, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(2 * time.Minute),
+		Error:        "429",
+		ErrorDetails: "rate limited",
+	}); err != nil {
+		t.Fatalf("StopFailure: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "SessionEnd",
+		Timestamp: start.Add(time.Minute),
+		Reason:    "stop-hook",
+	}); err != nil {
+		t.Fatalf("late SessionEnd: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "failed" {
+		t.Errorf("Status = %q, want failed", got[0].Status)
+	}
+	if !got[0].EndedAt.Equal(start.Add(time.Minute)) {
+		t.Errorf("EndedAt = %v, want %v", got[0].EndedAt, start.Add(time.Minute))
+	}
+	if got[0].EndReason != "stop-hook" {
+		t.Errorf("EndReason = %q, want stop-hook", got[0].EndReason)
+	}
+	if !got[0].LastSeenAt.Equal(start.Add(2 * time.Minute)) {
+		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(2*time.Minute))
+	}
+}
+
+func TestUpsertSessionTelemetryLateSessionStartPreservesMetadataWithoutStatusRegression(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 12, 45, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "Stop",
+		Timestamp: start.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:    "s1",
+		Event:      "SessionStart",
+		Timestamp:  start,
+		Transcript: "/tmp/s1.jsonl",
+		CWD:        "/repo",
+		Model:      "claude-sonnet-4-6",
+		Source:     "hook",
+		Permission: "acceptEdits",
+	}); err != nil {
+		t.Fatalf("late SessionStart: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "completed" {
+		t.Errorf("Status = %q, want completed", got[0].Status)
+	}
+	if !got[0].StartedAt.Equal(start) {
+		t.Errorf("StartedAt = %v, want %v", got[0].StartedAt, start)
+	}
+	if got[0].Transcript != "/tmp/s1.jsonl" || got[0].CWD != "/repo" ||
+		got[0].Model != "claude-sonnet-4-6" || got[0].Source != "hook" ||
+		got[0].Permission != "acceptEdits" {
+		t.Errorf("late SessionStart metadata not merged: %+v", got[0])
+	}
+	if !got[0].LastSeenAt.Equal(start.Add(time.Minute)) {
+		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(time.Minute))
+	}
 }
 
 func TestUpsertSessionTelemetryUnknownEventPreservesCompletedStatus(t *testing.T) {
@@ -292,8 +437,74 @@ func TestUpsertSessionTelemetryOlderEventDoesNotMoveLastSeenBackward(t *testing.
 	if !got[0].LastSeenAt.Equal(start.Add(5 * time.Minute)) {
 		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(5*time.Minute))
 	}
-	if got[0].CompactCount != 0 {
-		t.Errorf("CompactCount = %d, want 0 for replayed older compact event", got[0].CompactCount)
+	if got[0].CompactCount != 1 {
+		t.Errorf("CompactCount = %d, want 1 for observed older compact event", got[0].CompactCount)
+	}
+}
+
+func TestUpsertSessionTelemetryOlderUnknownEventDoesNotChangeStatusOrLastSeen(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 14, 30, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "Stop",
+		Timestamp: start.Add(5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "FutureHook",
+		Timestamp: start.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("old FutureHook: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "completed" {
+		t.Errorf("Status = %q, want completed", got[0].Status)
+	}
+	if !got[0].LastSeenAt.Equal(start.Add(5 * time.Minute)) {
+		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(5*time.Minute))
+	}
+}
+
+func TestUpsertSessionTelemetryDuplicatePostCompactCountsObservedEvents(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	ts := time.Date(2026, 5, 20, 15, 0, 0, 0, time.UTC)
+	event := contracts.HookEvent{
+		Session:   "s1",
+		Event:     "PostCompact",
+		Timestamp: ts,
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", event); err != nil {
+		t.Fatalf("first PostCompact: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", event); err != nil {
+		t.Fatalf("duplicate PostCompact: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].CompactCount != 2 {
+		t.Errorf("CompactCount = %d, want 2 because session aggregates have no hook event id dedupe", got[0].CompactCount)
 	}
 }
 
