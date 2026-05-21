@@ -31,7 +31,9 @@ func TestHealthEndpoint(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Version string `json:"version"`
 	}
-	_ = json.NewDecoder(res.Body).Decode(&body)
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if !body.OK || body.Version != "test" {
 		t.Errorf("got %+v", body)
 	}
