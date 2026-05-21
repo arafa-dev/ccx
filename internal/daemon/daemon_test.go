@@ -70,6 +70,16 @@ func TestStatusHandlesMissingRunningAndStaleRuntimeFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	writePIDFile(t, root, 9999)
+	proc.setAlive(9999, true)
+	pidOnlyStarting, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status(pid-only live): %v", err)
+	}
+	if pidOnlyStarting.Running || pidOnlyStarting.URL != "" || pidOnlyStarting.PID != 9999 {
+		t.Fatalf("pid-only live status = %+v", pidOnlyStarting)
+	}
+
+	proc.setAlive(9999, false)
 	pidOnly, err := c.Status(ctx)
 	if err != nil {
 		t.Fatalf("Status(pid-only stale): %v", err)
@@ -134,6 +144,98 @@ func TestStartDetachedRefusesDuplicateAndReplacesStalePID(t *testing.T) {
 	}
 	if got := strings.TrimSpace(readFile(t, filepath.Join(root, "daemon.pid"))); got != "4321" {
 		t.Fatalf("pid file = %q, want 4321", got)
+	}
+}
+
+func TestStartDetachedReportsBusyWhenStartLockActiveAndRecoversStaleLock(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	lockPath := filepath.Join(root, "daemon.lock")
+	proc := newFakeProcessManager()
+	proc.nextPID = 5678
+	c := Controller{
+		Root:           root,
+		Version:        "test",
+		Executable:     "/bin/ccx",
+		Process:        proc,
+		StartupTimeout: 200 * time.Millisecond,
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lockPath, []byte("starting\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	busy, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected active start lock to fail")
+	}
+	if !strings.Contains(err.Error(), "daemon start already in progress") {
+		t.Fatalf("error = %v", err)
+	}
+	if busy.Started || busy.AlreadyRunning || proc.startCalls != 0 {
+		t.Fatalf("busy result = %+v startCalls=%d", busy, proc.startCalls)
+	}
+
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(lockPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	proc.onStart = func(spec *StartProcessSpec, pid int) {
+		writePIDFile(t, spec.Root, pid)
+		writeStatusFile(t, spec.Root, contracts.DaemonStatus{
+			PID:       pid,
+			Version:   spec.Version,
+			Port:      7777,
+			URL:       "http://127.0.0.1:7777",
+			DBPath:    filepath.Join(spec.Root, "state.db"),
+			LogPath:   spec.LogPath,
+			Running:   true,
+			StartedAt: time.Now().UTC(),
+		})
+	}
+
+	started, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
+	if err != nil {
+		t.Fatalf("StartDetached(stale lock): %v", err)
+	}
+	if !started.Started || started.Status.PID != 5678 || proc.startCalls != 1 {
+		t.Fatalf("started result = %+v startCalls=%d", started, proc.startCalls)
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("lock file after successful start: %v", err)
+	}
+}
+
+func TestStartDetachedTimeoutDoesNotReportPIDOnlyAsRunning(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	proc.nextPID = 6543
+	proc.onStart = func(spec *StartProcessSpec, pid int) {
+		writePIDFile(t, spec.Root, pid)
+	}
+	c := Controller{
+		Root:           root,
+		Version:        "test",
+		Executable:     "/bin/ccx",
+		Process:        proc,
+		StartupTimeout: 75 * time.Millisecond,
+	}
+
+	result, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected start timeout when status URL is never written")
+	}
+	if !strings.Contains(err.Error(), "daemon did not become ready") {
+		t.Fatalf("error = %v", err)
+	}
+	if !result.Started || result.Status.PID != 6543 {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Status.Running || result.Status.URL != "" {
+		t.Fatalf("pid-only timeout status = %+v", result.Status)
 	}
 }
 

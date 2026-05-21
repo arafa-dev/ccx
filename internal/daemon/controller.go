@@ -67,6 +67,7 @@ type Controller struct {
 	Process        ProcessManager
 	StartupTimeout time.Duration
 	StopTimeout    time.Duration
+	LockStaleAfter time.Duration
 }
 
 // Status reads daemon runtime files and verifies the recorded process is alive.
@@ -76,7 +77,7 @@ func (c *Controller) Status(_ context.Context) (contracts.DaemonStatus, error) {
 		return contracts.DaemonStatus{}, err
 	}
 	paths := RuntimePaths(root)
-	status, _, err := readStatus(&paths)
+	status, hasStatus, err := readStatus(&paths)
 	if err != nil {
 		return contracts.DaemonStatus{}, err
 	}
@@ -86,7 +87,7 @@ func (c *Controller) Status(_ context.Context) (contracts.DaemonStatus, error) {
 		status.PID = pid
 	}
 	c.fillStatusDefaults(&paths, &status)
-	status.Running = status.PID > 0 && c.process().Alive(status.PID)
+	status.Running = hasStatus && status.PID > 0 && status.URL != "" && c.process().Alive(status.PID)
 	return status, nil
 }
 
@@ -105,6 +106,32 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 	}
 
 	status, err := c.Status(ctx)
+	if err != nil {
+		return StartResult{}, err
+	}
+	if status.Running {
+		return StartResult{Status: status, AlreadyRunning: true}, nil
+	}
+
+	lock, err := acquireDaemonLock(&paths, c.lockStaleAfter())
+	if err != nil {
+		status, statusErr := c.Status(ctx)
+		if statusErr != nil {
+			return StartResult{}, statusErr
+		}
+		if status.Running {
+			return StartResult{Status: status, AlreadyRunning: true}, nil
+		}
+		return StartResult{Status: status}, err
+	}
+	releaseLock := true
+	defer func() {
+		if releaseLock {
+			lock.release()
+		}
+	}()
+
+	status, err = c.Status(ctx)
 	if err != nil {
 		return StartResult{}, err
 	}
@@ -133,7 +160,7 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 		Version:    c.Version,
 		Executable: exe,
 		Args:       args,
-		Env:        os.Environ(),
+		Env:        append(os.Environ(), envLockHeldByParent+"=1"),
 		LogPath:    paths.LogPath,
 	}
 	pid, err := c.process().StartDetached(ctx, spec)
@@ -143,8 +170,11 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 
 	status, err = c.waitForReadyStatus(ctx, pid)
 	if err != nil {
+		_ = c.process().Terminate(pid)
 		return StartResult{Status: status, Started: true}, err
 	}
+	lock.disown()
+	releaseLock = false
 	return StartResult{Status: status, Started: true}, nil
 }
 
@@ -167,6 +197,7 @@ func (c *Controller) Stop(ctx context.Context) (StopResult, error) {
 				return StopResult{}, err
 			}
 			removePIDIf(&paths, status.PID)
+			removeLock(&paths)
 		}
 		return StopResult{Status: status}, nil
 	}
@@ -183,6 +214,7 @@ func (c *Controller) Stop(ctx context.Context) (StopResult, error) {
 				return StopResult{}, err
 			}
 			removePIDIf(&paths, status.PID)
+			removeLock(&paths)
 			return StopResult{Status: status, Stopped: true}, nil
 		}
 		select {
@@ -252,6 +284,13 @@ func (c *Controller) stopTimeout() time.Duration {
 		return c.StopTimeout
 	}
 	return defaultStopWait
+}
+
+func (c *Controller) lockStaleAfter() time.Duration {
+	if c.LockStaleAfter > 0 {
+		return c.LockStaleAfter
+	}
+	return defaultLockStaleAfter
 }
 
 func (c *Controller) fillStatusDefaults(paths *Paths, status *contracts.DaemonStatus) {

@@ -79,3 +79,7 @@ func removeRuntimeState(paths *Paths) {
 	_ = os.Remove(paths.StatusPath)
 	_ = os.Remove(paths.StatusPath + ".tmp")
 }
+
+func removeLock(paths *Paths) {
+	_ = os.Remove(paths.LockPath)
+}

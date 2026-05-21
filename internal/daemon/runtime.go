@@ -42,6 +42,16 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return fmt.Errorf("create daemon root: %w", err)
 	}
+	var lock *daemonLock
+	if os.Getenv(envLockHeldByParent) == "1" {
+		lock, err = adoptDaemonLock(&paths)
+	} else {
+		lock, err = acquireDaemonLock(&paths, defaultLockStaleAfter)
+	}
+	if err != nil {
+		return err
+	}
+	defer lock.release()
 
 	logFile, err := os.OpenFile(paths.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // path is controlled by ccx home.
 	if err != nil {

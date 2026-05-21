@@ -32,7 +32,7 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if status.Running {
+			if status.Running && status.URL != "" {
 				return openOrPrintDashboard(c, opts, status.URL, noOpen)
 			}
 			if daemonMode {

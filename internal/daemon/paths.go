@@ -6,6 +6,7 @@ const (
 	pidFileName    = "daemon.pid"
 	statusFileName = "daemon.json"
 	logFileName    = "daemon.log"
+	lockFileName   = "daemon.lock"
 	dbFileName     = "state.db"
 )
 
@@ -15,6 +16,7 @@ type Paths struct {
 	PIDPath    string
 	StatusPath string
 	LogPath    string
+	LockPath   string
 	DBPath     string
 }
 
@@ -25,6 +27,7 @@ func RuntimePaths(root string) Paths {
 		PIDPath:    filepath.Join(root, pidFileName),
 		StatusPath: filepath.Join(root, statusFileName),
 		LogPath:    filepath.Join(root, logFileName),
+		LockPath:   filepath.Join(root, lockFileName),
 		DBPath:     filepath.Join(root, dbFileName),
 	}
 }

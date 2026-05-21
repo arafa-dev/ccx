@@ -170,6 +170,36 @@ func TestDashboardDaemonStartsDaemonWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestDashboardDaemonTreatsPIDOnlyDaemonAsNotReady(t *testing.T) {
+	root := t.TempDir()
+	proc := newCLIFakeProcess(root)
+	proc.setAlive(2469, true)
+	paths := daemon.RuntimePaths(root)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.PIDPath, []byte("2469\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, stderr, code := runCLIWithOptions(Options{
+		Args:          []string{"dashboard", "--daemon", "--no-open", "--port", "7783"},
+		Build:         BuildInfo{Version: "test"},
+		DaemonRoot:    root,
+		DaemonProcess: proc,
+		Executable:    "/bin/ccx",
+	})
+	if code != 0 {
+		t.Fatalf("dashboard --daemon exit=%d stderr=%q", code, stderr)
+	}
+	if proc.startCalls != 1 {
+		t.Fatalf("startCalls = %d, want 1", proc.startCalls)
+	}
+	if strings.Contains(out, "ccx dashboard at \n") || !strings.Contains(out, "http://127.0.0.1:7783") {
+		t.Fatalf("dashboard --daemon output = %q", out)
+	}
+}
+
 func runCLIWithOptions(opts Options) (string, string, int) {
 	var stdout, stderr bytes.Buffer
 	opts.Stdout = &stdout
