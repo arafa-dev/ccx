@@ -22,6 +22,8 @@ Thumbs.db
 web/node_modules/
 web/.next/
 web/out/
+internal/dashboard/web-out/*
+!internal/dashboard/web-out/.gitkeep
 
 # Local state
 .env
