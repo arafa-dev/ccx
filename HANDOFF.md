@@ -1,15 +1,19 @@
 # ccx — Handoff Document
 
 **Generated:** 2026-05-20
-**Purpose:** Bring a fresh AI context (or human teammate) up to speed in <5 minutes so the next phase of work can start without re-deriving anything.
+**Purpose:** Bring a fresh AI context (or human teammate) up to speed in <5 minutes so the next phase of work can
+start without re-deriving anything.
 
 ---
 
 ## TL;DR
 
-**ccx** is a Go CLI + embedded Next.js dashboard for managing multiple Claude Code accounts. It switches between accounts (via `CLAUDE_CONFIG_DIR` export) and tracks per-profile usage from JSONL session files. Single binary, cross-platform (macOS + Linux + Windows), distributed via brew/scoop/apt/curl|sh.
+**ccx** is a Go CLI + embedded Next.js dashboard for managing multiple Claude Code accounts. It switches between
+accounts (via `CLAUDE_CONFIG_DIR` export) and tracks per-profile usage from JSONL session files. Single binary,
+cross-platform (macOS + Linux + Windows), distributed via brew/scoop/apt/curl|sh.
 
-**Status:** Spec + 12 implementation plans are written. Phase 0 (contracts/schema/CI) is executed and on `main`. Phase 1 (9 parallel package implementations) is **ready to dispatch** but has not started.
+**Status:** Spec + 12 implementation plans are written. Phase 0 (contracts/schema/CI) is executed and on `main`.
+Phase 1 (9 parallel package implementations) is **ready to dispatch** but has not started.
 
 **Repo:** [github.com/arafa-dev/ccx](https://github.com/arafa-dev/ccx) — currently at commit `84e3e44`.
 
@@ -51,7 +55,8 @@ These changes are reflected in A3's amendment block and in P2's wiring code.
 
 ## Phase 1 — READY TO DISPATCH (9 parallel plans)
 
-Each plan is a self-contained, bite-sized-task implementation guide with exact code in every step. Each runs in its own git worktree.
+Each plan is a self-contained, bite-sized-task implementation guide with exact code in every step. Each runs in its
+own git worktree.
 
 | Plan | Plan path | Worktree | Package |
 |---|---|---|---|
@@ -76,19 +81,25 @@ done
 
 Then dispatch one Codex agent per worktree with a prompt template like:
 
-> Read `docs/superpowers/plans/2026-05-19-ccx-phase-1-A{N}-{name}.md` and execute every task in order. Bite-sized step pattern: failing test → run-fail → impl → run-pass → commit. One commit per task. Do not modify files outside your assigned package. Open a PR against `main` when all tasks are done.
+> Read `docs/superpowers/plans/2026-05-19-ccx-phase-1-A{N}-{name}.md` and execute every task in order.
+> Bite-sized step pattern: failing test → run-fail → impl → run-pass → commit. One commit per task. Do not modify
+> files outside your assigned package. Open a PR against `main` when all tasks are done.
 
 ### Critical rules for Phase 1 agents
 
-1. **Never edit `internal/contracts/`, `api/openapi.yaml`, `internal/storage/schema.sql`, or `docs/conventions.md`** from a Phase 1 worktree. If a contract needs to change, pause that worktree, open a separate contract-amendment PR against `main`, merge it, then rebase the worktree.
-2. **Never import from a sibling `internal/*` package.** Only `internal/contracts` and stdlib + the dependencies declared in your plan.
+1. **Never edit `internal/contracts/`, `api/openapi.yaml`, `internal/storage/schema.sql`, or `docs/conventions.md`**
+   from a Phase 1 worktree. If a contract needs to change, pause that worktree, open a separate contract-amendment
+   PR against `main`, merge it, then rebase the worktree.
+2. **Never import from a sibling `internal/*` package.** Only `internal/contracts` and stdlib + the dependencies
+   declared in your plan.
 3. **One commit per task.** Conventional commits format: `type(scope): subject`.
 
 ### After Phase 1 merges → Phase 2 (Integration)
 
 - Plan: [`docs/superpowers/plans/2026-05-19-ccx-phase-2-integration.md`](docs/superpowers/plans/2026-05-19-ccx-phase-2-integration.md)
 - One Codex agent, ~1-2 weeks
-- Wires `internal/cli`, `internal/server`, `internal/tui`, `internal/doctor`, `internal/dashboard` + adds `cmd/ccx/main.go` + end-to-end integration tests
+- Wires `internal/cli`, `internal/server`, `internal/tui`, `internal/doctor`, `internal/dashboard` + adds
+  `cmd/ccx/main.go` + end-to-end integration tests
 
 ### After Phase 2 → Phase 3 (Polish & launch)
 
@@ -111,7 +122,8 @@ Then dispatch one Codex agent per worktree with a prompt template like:
 
 ## Key decisions made (don't re-litigate)
 
-These were settled during brainstorming. If the next session asks "should we do X instead?", here's why we picked what we picked:
+These were settled during brainstorming. If the next session asks "should we do X instead?", here's why we picked
+what we picked:
 
 | Decision | Why |
 |---|---|
@@ -150,19 +162,29 @@ grep "InsertEvents" internal/contracts/interfaces.go
 
 ## Important context for the next session
 
-- The user's working directory is `/Users/arafa/Developer/ccx` (macOS). `~/.claude` already exists and is their personal account.
-- The user is running multi-agent execution via **Codex CLI**, not Claude Code, for Phase 1 onward. Plans are written to be portable (no Claude-Code-specific assumptions).
-- Branch protection is enabled on `main` (requires PR + 4 CI checks), but the user has admin override. They've used direct pushes for plan docs; **Phase 1 code work should go through PRs** to keep the activity graph healthy for CV signal.
-- The user previously hit a usage limit while I was dispatching parallel subagents to write A1–A9. A1–A8 made it to disk; A9 was written by me directly afterward. P2, P3, the plan index, and all patches were also written by me directly. Treat A1–A8 with appropriate skepticism — they were subagent-authored.
-- ~~Anything about the user's role/preferences worth knowing~~ — see `MEMORY.md` if any was saved (this conversation didn't add anything).
+- The user's working directory is `/Users/arafa/Developer/ccx` (macOS). `~/.claude` already exists and is their
+  personal account.
+- The user is running multi-agent execution via **Codex CLI**, not Claude Code, for Phase 1 onward. Plans are written
+  to be portable (no Claude-Code-specific assumptions).
+- Branch protection is enabled on `main` (requires PR + 4 CI checks), but the user has admin override. They've used
+  direct pushes for plan docs; **Phase 1 code work should go through PRs** to keep the activity graph healthy for CV
+  signal.
+- The user previously hit a usage limit while I was dispatching parallel subagents to write A1–A9. A1–A8 made it to
+  disk; A9 was written by me directly afterward. P2, P3, the plan index, and all patches were also written by me
+  directly. Treat A1–A8 with appropriate skepticism — they were subagent-authored.
+- ~~Anything about the user's role/preferences worth knowing~~ — see `MEMORY.md` if any was saved (this conversation
+  didn't add anything).
 
 ---
 
 ## Suggested next prompt for fresh context
 
-> Read `HANDOFF.md` and `docs/superpowers/plans/2026-05-19-ccx-plan-index.md`. Then help me dispatch Codex agents for Phase 1. Start with A4 (pricing) as a small first test of the dispatch workflow before fanning out to the larger plans.
+> Read `HANDOFF.md` and `docs/superpowers/plans/2026-05-19-ccx-plan-index.md`. Then help me dispatch Codex agents
+> for Phase 1. Start with A4 (pricing) as a small first test of the dispatch workflow before fanning out to the
+> larger plans.
 
-(Why A4 first: small plan, no cross-package dependencies beyond contracts, easy to verify the agent did the right thing before committing to dispatching all 9.)
+(Why A4 first: small plan, no cross-package dependencies beyond contracts, easy to verify the agent did the right
+thing before committing to dispatching all 9.)
 
 ---
 
