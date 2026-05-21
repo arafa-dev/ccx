@@ -85,12 +85,15 @@ func newProfileListCmd() *cobra.Command {
 				_, _ = fmt.Fprintln(c.OutOrStdout(), "No profiles registered. Run `ccx profile add <name> --config-dir <path>`.")
 				return nil
 			}
-			active, _, _ := deps.Profiles.Active(ctx)
+			active, okActive, err := deps.Profiles.Active(ctx)
+			if err != nil && !errors.Is(err, contracts.ErrNoActiveProfile) {
+				return err
+			}
 			w := tabwriter.NewWriter(c.OutOrStdout(), 0, 0, 2, ' ', 0)
 			_, _ = fmt.Fprintln(w, "NAME\tCONFIG_DIR\tLAST USED\tTODAY ($)")
 			for _, p := range profiles {
 				marker := " "
-				if p.Name == active.Name {
+				if okActive && p.Name == active.Name {
 					marker = "*"
 				}
 				today := todayCostFor(ctx, deps, p.Name)
