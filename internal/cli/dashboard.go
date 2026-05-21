@@ -21,6 +21,10 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 		Use:   "dashboard",
 		Short: "Open the local dashboard",
 		RunE: func(c *cobra.Command, _ []string) error {
+			if port != 0 && (port < 1 || port > 65535) {
+				return fmt.Errorf("invalid --port %d: must be in range 1-65535", port)
+			}
+
 			ctx := c.Context()
 			deps, err := buildDeps(ctx)
 			if err != nil {

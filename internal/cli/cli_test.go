@@ -40,3 +40,19 @@ func TestExecuteVersion(t *testing.T) {
 		t.Errorf("version: code=%d out=%q", code, stdout.String())
 	}
 }
+
+func TestDashboardRejectsInvalidPort(t *testing.T) {
+	var stderr bytes.Buffer
+	code := cli.Run(context.Background(), cli.Options{
+		Args:   []string{"dashboard", "--no-open", "--port", "70000"},
+		Stderr: &stderr,
+		Build:  cli.BuildInfo{Version: "test"},
+	})
+	if code == 0 {
+		t.Fatal("expected dashboard to fail for invalid port")
+	}
+	if got := stderr.String(); !strings.Contains(got, "invalid --port 70000") ||
+		!strings.Contains(got, "1-65535") {
+		t.Fatalf("unexpected error: %q", got)
+	}
+}
