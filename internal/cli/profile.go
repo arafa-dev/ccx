@@ -96,7 +96,10 @@ func newProfileListCmd() *cobra.Command {
 				if okActive && p.Name == active.Name {
 					marker = "*"
 				}
-				today := todayCostFor(ctx, deps, p.Name)
+				today, err := todayCostFor(ctx, deps, p.Name)
+				if err != nil {
+					return fmt.Errorf("today cost for profile %q: %w", p.Name, err)
+				}
 				lastUsed := "-"
 				if !p.LastUsedAt.IsZero() {
 					lastUsed = p.LastUsedAt.Format(time.RFC3339)
@@ -158,19 +161,22 @@ func newProfileCurrentCmd() *cobra.Command {
 	}
 }
 
-func todayCostFor(ctx context.Context, deps *Deps, name string) float64 {
+func todayCostFor(ctx context.Context, deps *Deps, name string) (float64, error) {
 	start := time.Now().UTC().Truncate(24 * time.Hour)
 	rows, err := deps.Store.QueryUsage(ctx, contracts.UsageQuery{
 		Profile: name,
 		Range:   contracts.TimeRange{Start: start, End: start.Add(24 * time.Hour)},
 	})
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	var sum float64
 	for _, r := range rows {
-		c, _ := deps.Pricing.Cost(r.Model, r.Day, r.Usage)
+		c, err := deps.Pricing.Cost(r.Model, r.Day, r.Usage)
+		if err != nil {
+			return 0, err
+		}
 		sum += c
 	}
-	return sum
+	return sum, nil
 }
