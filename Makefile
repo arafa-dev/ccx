@@ -12,6 +12,10 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 stage-web: ## Stage web/out into internal/dashboard for go:embed
+	@if [ ! -d web/out ]; then \
+		printf "web/out not found: run 'pnpm build' in web/ before staging\n" >&2; \
+		exit 1; \
+	fi
 	rm -rf internal/dashboard/web-out
 	mkdir -p internal/dashboard/web-out
 	cp -R web/out/. internal/dashboard/web-out/
