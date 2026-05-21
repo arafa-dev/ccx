@@ -473,6 +473,171 @@ func TestUpsertSessionTelemetryLaterStopFailureUpdatesFailureFacts(t *testing.T)
 	}
 }
 
+func TestUpsertSessionTelemetryNewerStopFailureWithBlankDetailsClearsOlderDetails(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 13, 45, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(time.Minute),
+		Error:        "older-auth",
+		ErrorDetails: "older token expired",
+	}); err != nil {
+		t.Fatalf("older StopFailure: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "StopFailure",
+		Timestamp: start.Add(2 * time.Minute),
+		Error:     "newer-429",
+	}); err != nil {
+		t.Fatalf("newer StopFailure: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].FailureError != "newer-429" || got[0].FailureDetails != "" {
+		t.Errorf("failure fields = (%q, %q), want (newer-429, empty)", got[0].FailureError, got[0].FailureDetails)
+	}
+}
+
+func TestUpsertSessionTelemetryNewerStopFailureWithBlankErrorClearsOlderError(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(time.Minute),
+		Error:        "older-auth",
+		ErrorDetails: "older token expired",
+	}); err != nil {
+		t.Fatalf("older StopFailure: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(2 * time.Minute),
+		ErrorDetails: "newer detail only",
+	}); err != nil {
+		t.Fatalf("newer StopFailure: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].FailureError != "" || got[0].FailureDetails != "newer detail only" {
+		t.Errorf("failure fields = (%q, %q), want (empty, newer detail only)", got[0].FailureError, got[0].FailureDetails)
+	}
+}
+
+func TestUpsertSessionTelemetryNewerBlankStopFailureClearsOlderFailureFacts(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 14, 15, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(time.Minute),
+		Error:        "older-auth",
+		ErrorDetails: "older token expired",
+	}); err != nil {
+		t.Fatalf("older StopFailure: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "StopFailure",
+		Timestamp: start.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("newer blank StopFailure: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "failed" {
+		t.Errorf("Status = %q, want failed", got[0].Status)
+	}
+	if got[0].FailureError != "" || got[0].FailureDetails != "" {
+		t.Errorf("failure fields = (%q, %q), want both empty", got[0].FailureError, got[0].FailureDetails)
+	}
+}
+
+func TestUpsertSessionTelemetrySameTimestampStopFailureUsesDeterministicTieBreak(t *testing.T) {
+	ctx := context.Background()
+	ts := time.Date(2026, 5, 20, 14, 30, 0, 0, time.UTC)
+	lower := contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    ts,
+		Error:        "alpha",
+		ErrorDetails: "zulu",
+	}
+	higher := contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    ts,
+		Error:        "bravo",
+		ErrorDetails: "",
+	}
+
+	first := newTestStore(t)
+	mustSaveProfile(t, first, "work")
+	if err := first.UpsertSessionTelemetry(ctx, "work", lower); err != nil {
+		t.Fatalf("first lower StopFailure: %v", err)
+	}
+	if err := first.UpsertSessionTelemetry(ctx, "work", higher); err != nil {
+		t.Fatalf("first higher StopFailure: %v", err)
+	}
+
+	second := newTestStore(t)
+	mustSaveProfile(t, second, "work")
+	if err := second.UpsertSessionTelemetry(ctx, "work", higher); err != nil {
+		t.Fatalf("second higher StopFailure: %v", err)
+	}
+	if err := second.UpsertSessionTelemetry(ctx, "work", lower); err != nil {
+		t.Fatalf("second lower StopFailure: %v", err)
+	}
+
+	firstRows, err := first.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("first QuerySessions: %v", err)
+	}
+	secondRows, err := second.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("second QuerySessions: %v", err)
+	}
+	if len(firstRows) != 1 || len(secondRows) != 1 {
+		t.Fatalf("session lens = (%d, %d), want (1, 1)", len(firstRows), len(secondRows))
+	}
+	if firstRows[0].FailureError != "bravo" || firstRows[0].FailureDetails != "" {
+		t.Errorf("first failure fields = (%q, %q), want (bravo, empty)", firstRows[0].FailureError, firstRows[0].FailureDetails)
+	}
+	if secondRows[0].FailureError != "bravo" || secondRows[0].FailureDetails != "" {
+		t.Errorf("second failure fields = (%q, %q), want (bravo, empty)", secondRows[0].FailureError, secondRows[0].FailureDetails)
+	}
+}
+
 func TestUpsertSessionTelemetryUnknownEventPreservesCompletedStatus(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

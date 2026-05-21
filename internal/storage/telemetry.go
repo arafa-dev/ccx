@@ -100,16 +100,10 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 		}
 	case "StopFailure":
 		applySessionStatus(&rec, "failed")
-		if event.Error != "" && shouldReplaceFailureFact(rec.FailureAt, ts) {
+		if shouldReplaceFailureFacts(&rec, &event, ts) {
 			rec.FailureError = event.Error
-		}
-		if event.ErrorDetails != "" && shouldReplaceFailureFact(rec.FailureAt, ts) {
 			rec.FailureDetails = event.ErrorDetails
-		}
-		if event.Error != "" || event.ErrorDetails != "" {
-			if !rec.FailureAt.Valid || ts >= rec.FailureAt.Int64 {
-				rec.FailureAt = sql.NullInt64{Int64: ts, Valid: true}
-			}
+			rec.FailureAt = sql.NullInt64{Int64: ts, Valid: true}
 		}
 	case "SessionEnd":
 		if !rec.EndedAt.Valid || ts > rec.EndedAt.Int64 {
@@ -464,8 +458,22 @@ func sessionStatusRank(status string) int {
 	}
 }
 
-func shouldReplaceFailureFact(current sql.NullInt64, next int64) bool {
-	return !current.Valid || next >= current.Int64
+func shouldReplaceFailureFacts(rec *sessionRecord, event *contracts.HookEvent, ts int64) bool {
+	if !rec.FailureAt.Valid {
+		return true
+	}
+	if ts > rec.FailureAt.Int64 {
+		return true
+	}
+	if ts < rec.FailureAt.Int64 {
+		return false
+	}
+	// Equal-timestamp StopFailure events use lexicographic tuple max so the
+	// same set of hook payloads produces the same aggregate in any order.
+	if event.Error != rec.FailureError {
+		return event.Error > rec.FailureError
+	}
+	return event.ErrorDetails > rec.FailureDetails
 }
 
 func scanSessionTelemetry(rows *sql.Rows) (contracts.SessionTelemetry, error) {
