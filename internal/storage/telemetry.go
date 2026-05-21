@@ -92,22 +92,24 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 		if !rec.StartedAt.Valid || (ts != 0 && ts < rec.StartedAt.Int64) {
 			rec.StartedAt = sql.NullInt64{Int64: ts, Valid: true}
 		}
-		if !isTerminalSessionStatus(rec.Status) {
-			rec.Status = "running"
-		}
+		applySessionStatus(&rec, "running")
 	case "Stop":
-		if rec.Status != "failed" {
-			rec.Status = "completed"
+		if applySessionStatus(&rec, "completed") {
 			rec.FailureError = ""
 			rec.FailureDetails = ""
 		}
 	case "StopFailure":
-		rec.Status = "failed"
-		if event.Error != "" || rec.FailureError == "" {
+		applySessionStatus(&rec, "failed")
+		if event.Error != "" && shouldReplaceFailureFact(rec.FailureAt, ts) {
 			rec.FailureError = event.Error
 		}
-		if event.ErrorDetails != "" || rec.FailureDetails == "" {
+		if event.ErrorDetails != "" && shouldReplaceFailureFact(rec.FailureAt, ts) {
 			rec.FailureDetails = event.ErrorDetails
+		}
+		if event.Error != "" || event.ErrorDetails != "" {
+			if !rec.FailureAt.Valid || ts >= rec.FailureAt.Int64 {
+				rec.FailureAt = sql.NullInt64{Int64: ts, Valid: true}
+			}
 		}
 	case "SessionEnd":
 		if !rec.EndedAt.Valid || ts > rec.EndedAt.Int64 {
@@ -116,9 +118,7 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 		} else if rec.EndReason == "" {
 			rec.EndReason = event.Reason
 		}
-		if rec.Status != "failed" {
-			rec.Status = "ended"
-		}
+		applySessionStatus(&rec, "ended")
 	case "PreCompact":
 	case "PostCompact":
 		// The session aggregate has no hook event id, so compaction is counted
@@ -322,6 +322,7 @@ type sessionRecord struct {
 	LastSeenAt     int64
 	Status         string
 	EndReason      string
+	FailureAt      sql.NullInt64
 	FailureError   string
 	FailureDetails string
 	CompactCount   int
@@ -340,6 +341,7 @@ SELECT
     last_seen_at,
     status,
     COALESCE(end_reason, ''),
+    failure_at,
     COALESCE(failure_error, ''),
     COALESCE(failure_details, ''),
     compact_count
@@ -358,6 +360,7 @@ WHERE profile_name = ? AND session_id = ?
 		&rec.LastSeenAt,
 		&rec.Status,
 		&rec.EndReason,
+		&rec.FailureAt,
 		&rec.FailureError,
 		&rec.FailureDetails,
 		&rec.CompactCount,
@@ -376,8 +379,8 @@ func saveSessionRecord(ctx context.Context, tx *sql.Tx, rec *sessionRecord) erro
 INSERT INTO sessions (
     profile_name, session_id, transcript_path, cwd, model, source,
     permission_mode, started_at, ended_at, last_seen_at, status, end_reason,
-    failure_error, failure_details, compact_count
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    failure_at, failure_error, failure_details, compact_count
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(profile_name, session_id) DO UPDATE SET
     transcript_path = excluded.transcript_path,
     cwd             = excluded.cwd,
@@ -389,6 +392,7 @@ ON CONFLICT(profile_name, session_id) DO UPDATE SET
     last_seen_at    = excluded.last_seen_at,
     status          = excluded.status,
     end_reason      = excluded.end_reason,
+    failure_at      = excluded.failure_at,
     failure_error   = excluded.failure_error,
     failure_details = excluded.failure_details,
     compact_count   = excluded.compact_count
@@ -407,6 +411,7 @@ ON CONFLICT(profile_name, session_id) DO UPDATE SET
 		rec.LastSeenAt,
 		rec.Status,
 		rec.EndReason,
+		nullableInt64(rec.FailureAt),
 		rec.FailureError,
 		rec.FailureDetails,
 		rec.CompactCount,
@@ -434,8 +439,33 @@ func mergeEventMetadata(rec *sessionRecord, event *contracts.HookEvent, overwrit
 	}
 }
 
-func isTerminalSessionStatus(status string) bool {
-	return status == "completed" || status == "failed" || status == "ended"
+func applySessionStatus(rec *sessionRecord, next string) bool {
+	if sessionStatusRank(next) < sessionStatusRank(rec.Status) {
+		return false
+	}
+	rec.Status = next
+	return true
+}
+
+func sessionStatusRank(status string) int {
+	switch status {
+	case "failed":
+		return 5
+	case "ended":
+		return 4
+	case "completed":
+		return 3
+	case "running":
+		return 2
+	case "unknown", "":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func shouldReplaceFailureFact(current sql.NullInt64, next int64) bool {
+	return !current.Valid || next >= current.Int64
 }
 
 func scanSessionTelemetry(rows *sql.Rows) (contracts.SessionTelemetry, error) {

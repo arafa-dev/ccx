@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen_at    INTEGER NOT NULL,
     status          TEXT NOT NULL DEFAULT 'unknown',
     end_reason      TEXT,
+    failure_at      INTEGER,
     failure_error   TEXT,
     failure_details TEXT,
     compact_count   INTEGER NOT NULL DEFAULT 0,
@@ -119,6 +120,9 @@ func (s *Store) Migrate(ctx context.Context) (retErr error) {
 	if err := ensureProfileLimitColumns(ctx, tx); err != nil {
 		return fmt.Errorf("ensuring profile limit columns: %w", err)
 	}
+	if err := ensureSessionFailureAtColumn(ctx, tx); err != nil {
+		return fmt.Errorf("ensuring session failure timestamp column: %w", err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration: %w", err)
@@ -148,9 +152,23 @@ func schemaVersion(ctx context.Context, tx *sql.Tx) (int, error) {
 	return int(version.Int64), nil
 }
 
+func ensureSessionFailureAtColumn(ctx context.Context, tx *sql.Tx) error {
+	exists, err := tableColumnExists(ctx, tx, "sessions", "failure_at")
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN failure_at INTEGER"); err != nil {
+		return fmt.Errorf("adding sessions.failure_at: %w", err)
+	}
+	return nil
+}
+
 func ensureProfileLimitColumns(ctx context.Context, tx *sql.Tx) error {
 	for _, column := range profileLimitColumns {
-		exists, err := profileColumnExists(ctx, tx, column.name)
+		exists, err := tableColumnExists(ctx, tx, "profiles", column.name)
 		if err != nil {
 			return err
 		}
@@ -164,8 +182,12 @@ func ensureProfileLimitColumns(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func profileColumnExists(ctx context.Context, tx *sql.Tx, columnName string) (bool, error) {
-	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(profiles)")
+func tableColumnExists(ctx context.Context, tx *sql.Tx, tableName, columnName string) (bool, error) {
+	query, err := tableInfoQuery(tableName)
+	if err != nil {
+		return false, err
+	}
+	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return false, err
 	}
@@ -191,4 +213,15 @@ func profileColumnExists(ctx context.Context, tx *sql.Tx, columnName string) (bo
 		return false, err
 	}
 	return false, nil
+}
+
+func tableInfoQuery(tableName string) (string, error) {
+	switch tableName {
+	case "profiles":
+		return "PRAGMA table_info(profiles)", nil
+	case "sessions":
+		return "PRAGMA table_info(sessions)", nil
+	default:
+		return "", fmt.Errorf("unsupported table %q", tableName)
+	}
 }

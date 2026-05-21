@@ -304,6 +304,46 @@ func TestUpsertSessionTelemetryLateSessionEndPreservesFailedStatus(t *testing.T)
 	}
 }
 
+func TestUpsertSessionTelemetryOlderStopDoesNotDowngradeEndedStatus(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 12, 42, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "SessionEnd",
+		Timestamp: start.Add(2 * time.Minute),
+		Reason:    "turn-complete",
+	}); err != nil {
+		t.Fatalf("SessionEnd: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "Stop",
+		Timestamp: start.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("late Stop: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "ended" {
+		t.Errorf("Status = %q, want ended", got[0].Status)
+	}
+	if !got[0].LastSeenAt.Equal(start.Add(2 * time.Minute)) {
+		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(2*time.Minute))
+	}
+	if got[0].EndReason != "turn-complete" {
+		t.Errorf("EndReason = %q, want turn-complete", got[0].EndReason)
+	}
+}
+
 func TestUpsertSessionTelemetryLateSessionStartPreservesMetadataWithoutStatusRegression(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
@@ -350,6 +390,86 @@ func TestUpsertSessionTelemetryLateSessionStartPreservesMetadataWithoutStatusReg
 	}
 	if !got[0].LastSeenAt.Equal(start.Add(time.Minute)) {
 		t.Errorf("LastSeenAt = %v, want %v", got[0].LastSeenAt, start.Add(time.Minute))
+	}
+}
+
+func TestUpsertSessionTelemetryNewerStopFailureKeepsNewestFailureFacts(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 13, 15, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(2 * time.Minute),
+		Error:        "newer-429",
+		ErrorDetails: "newer rate limit",
+	}); err != nil {
+		t.Fatalf("newer StopFailure: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(time.Minute),
+		Error:        "older-auth",
+		ErrorDetails: "older token expired",
+	}); err != nil {
+		t.Fatalf("older StopFailure: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "failed" {
+		t.Errorf("Status = %q, want failed", got[0].Status)
+	}
+	if got[0].FailureError != "newer-429" || got[0].FailureDetails != "newer rate limit" {
+		t.Errorf("failure fields = (%q, %q), want (newer-429, newer rate limit)", got[0].FailureError, got[0].FailureDetails)
+	}
+}
+
+func TestUpsertSessionTelemetryLaterStopFailureUpdatesFailureFacts(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	start := time.Date(2026, 5, 20, 13, 30, 0, 0, time.UTC)
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(time.Minute),
+		Error:        "older-auth",
+		ErrorDetails: "older token expired",
+	}); err != nil {
+		t.Fatalf("older StopFailure: %v", err)
+	}
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    start.Add(2 * time.Minute),
+		Error:        "newer-429",
+		ErrorDetails: "newer rate limit",
+	}); err != nil {
+		t.Fatalf("newer StopFailure: %v", err)
+	}
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("sessions: got %d want 1", len(got))
+	}
+	if got[0].Status != "failed" {
+		t.Errorf("Status = %q, want failed", got[0].Status)
+	}
+	if got[0].FailureError != "newer-429" || got[0].FailureDetails != "newer rate limit" {
+		t.Errorf("failure fields = (%q, %q), want (newer-429, newer rate limit)", got[0].FailureError, got[0].FailureDetails)
 	}
 }
 
