@@ -5,11 +5,13 @@ package integration_test
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -55,7 +57,8 @@ func TestCCXProfileAddListUseDashboardFlow(t *testing.T) {
 	}
 
 	var dashOut bytes.Buffer
-	dashCmd := exec.Command(bin, "dashboard", "--no-open", "--port", "7787")
+	port := freeTCPPort(t)
+	dashCmd := exec.Command(bin, "dashboard", "--no-open", "--port", port)
 	dashCmd.Env = env
 	dashCmd.Stdout = &dashOut
 	dashCmd.Stderr = &dashOut
@@ -69,7 +72,7 @@ func TestCCXProfileAddListUseDashboardFlow(t *testing.T) {
 		}
 	}()
 
-	res, err := waitForHealth("http://127.0.0.1:7787/api/health")
+	res, err := waitForHealth("http://127.0.0.1:" + port + "/api/health")
 	if err != nil {
 		t.Fatalf("health: %v\n%s", err, dashOut.String())
 	}
@@ -93,6 +96,20 @@ func buildBinary(t *testing.T) string {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	return bin
+}
+
+func freeTCPPort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("unexpected listener addr %T", ln.Addr())
+	}
+	return strconv.Itoa(addr.Port)
 }
 
 func waitForHealth(url string) (*http.Response, error) {
