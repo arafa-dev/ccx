@@ -406,6 +406,36 @@ func TestStatusReportsMissingPartialInstalledAndInvalid(t *testing.T) {
 	}
 }
 
+func TestStatusReportsDisabledWhenAllHooksDisabled(t *testing.T) {
+	ctx := context.Background()
+	profile := testProfile(t, "work")
+	svc := testService(profile)
+	if _, err := svc.Install(ctx, InstallOptions{}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	path := filepath.Join(profile.ConfigDir, "settings.json")
+	settings := readSettings(t, path)
+	settings["disableAllHooks"] = json.RawMessage("true")
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	results, err := svc.Status(ctx, StatusOptions{})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results length = %d, want 1", len(results))
+	}
+	if results[0].Status != StatusDisabled || results[0].Installed || !results[0].Disabled {
+		t.Fatalf("result = %+v, want disabled/non-installed", results[0])
+	}
+}
+
 func TestInstallProfileFlagRequiresRegisteredProfile(t *testing.T) {
 	ctx := context.Background()
 	svc := testService(testProfile(t, "work"))

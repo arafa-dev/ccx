@@ -183,7 +183,57 @@ func TestRecordRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestRecordRejectsMalformedPayloadsBeforeStoreWrites(t *testing.T) {
+	ctx := context.Background()
+	profile := contracts.Profile{Name: "work", ConfigDir: t.TempDir()}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "missing session id",
+			in:   `{"hook_event_name":"SessionStart"}`,
+			want: "session_id",
+		},
+		{
+			name: "trailing JSON",
+			in:   `{"session_id":"s1","hook_event_name":"SessionStart"} {"session_id":"s2"}`,
+			want: "trailing",
+		},
+		{
+			name: "oversized input",
+			in:   `{"session_id":"s1","hook_event_name":"SessionStart","padding":"` + strings.Repeat("x", 1024*1024) + `"}`,
+			want: "too large",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeHookStore{}
+			svc := testService(profile)
+			svc.Store = store
+
+			_, err := svc.Record(ctx, RecordOptions{
+				Profile: "work",
+				Input:   strings.NewReader(tc.in),
+			})
+			if err == nil {
+				t.Fatalf("Record succeeded, want error containing %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q, want substring %q", err, tc.want)
+			}
+			if len(store.saved) != 0 || len(store.inserted) != 0 || len(store.upserted) != 0 {
+				t.Fatalf("store writes after invalid payload: saves=%d inserts=%d upserts=%d", len(store.saved), len(store.inserted), len(store.upserted))
+			}
+		})
+	}
+}
+
 type fakeHookStore struct {
+	saved    []contracts.Profile
 	inserted []storedHookEvent
 	upserted []storedHookEvent
 }
@@ -191,6 +241,14 @@ type fakeHookStore struct {
 type storedHookEvent struct {
 	profile string
 	event   contracts.HookEvent
+}
+
+func (f *fakeHookStore) SaveProfile(ctx context.Context, profile contracts.Profile) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.saved = append(f.saved, profile)
+	return nil
 }
 
 func (f *fakeHookStore) InsertHookEvent(ctx context.Context, profileName string, event contracts.HookEvent) error {

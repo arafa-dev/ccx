@@ -14,6 +14,8 @@ import (
 	"github.com/arafa-dev/ccx/internal/contracts"
 )
 
+const maxHookPayloadBytes = 1 << 20
+
 // Record reads one Claude Code hook payload and stores normalized telemetry.
 func (s *Service) Record(ctx context.Context, opts RecordOptions) (RecordResult, error) {
 	result := RecordResult{Profile: opts.Profile}
@@ -38,12 +40,6 @@ func (s *Service) Record(ctx context.Context, opts RecordOptions) (RecordResult,
 		result.Error = err.Error()
 		return result, err
 	}
-	if saver, ok := s.Store.(profileSaver); ok {
-		if err := saver.SaveProfile(ctx, profile); err != nil {
-			result.Error = err.Error()
-			return result, err
-		}
-	}
 
 	input := opts.Input
 	if input == nil {
@@ -54,10 +50,21 @@ func (s *Service) Record(ctx context.Context, opts RecordOptions) (RecordResult,
 		result.Error = err.Error()
 		return result, err
 	}
+	if event.Session == "" {
+		err := errors.New("hook payload missing session_id")
+		result.Error = err.Error()
+		return result, err
+	}
 	if event.Event == "" {
 		err := errors.New("hook payload missing hook_event_name")
 		result.Error = err.Error()
 		return result, err
+	}
+	if saver, ok := s.Store.(profileSaver); ok {
+		if err := saver.SaveProfile(ctx, profile); err != nil {
+			result.Error = err.Error()
+			return result, err
+		}
 	}
 
 	if err := s.Store.InsertHookEvent(ctx, opts.Profile, event); err != nil {
@@ -81,14 +88,24 @@ type profileSaver interface {
 }
 
 func (s *Service) parseHookEvent(r io.Reader, profile string) (contracts.HookEvent, error) {
-	data, err := io.ReadAll(r)
+	data, err := io.ReadAll(io.LimitReader(r, maxHookPayloadBytes+1))
 	if err != nil {
 		return contracts.HookEvent{}, fmt.Errorf("reading hook payload: %w", err)
+	}
+	if len(data) > maxHookPayloadBytes {
+		return contracts.HookEvent{}, fmt.Errorf("hook payload too large: limit is %d bytes", maxHookPayloadBytes)
 	}
 	var payload map[string]any
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	if err := dec.Decode(&payload); err != nil {
+		return contracts.HookEvent{}, fmt.Errorf("parsing hook payload: %w", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return contracts.HookEvent{}, errors.New("parsing hook payload: trailing JSON data")
+		}
 		return contracts.HookEvent{}, fmt.Errorf("parsing hook payload: %w", err)
 	}
 

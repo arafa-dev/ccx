@@ -20,6 +20,8 @@ const (
 	StatusInvalid Status = "invalid"
 	// StatusPartial means some or all required ccx hooks are absent.
 	StatusPartial Status = "partial"
+	// StatusDisabled means Claude Code has disableAllHooks enabled.
+	StatusDisabled Status = "disabled"
 	// StatusInstalled means all required ccx hooks are present.
 	StatusInstalled Status = "installed"
 )
@@ -51,6 +53,7 @@ type Result struct {
 	Profile      string `json:"profile"`
 	Installed    bool   `json:"installed"`
 	Status       Status `json:"status"`
+	Disabled     bool   `json:"disabled"`
 	SettingsPath string `json:"settings_path"`
 	BackupPath   string `json:"backup_path,omitempty"`
 	Message      string `json:"message,omitempty"`

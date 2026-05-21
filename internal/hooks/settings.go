@@ -120,8 +120,9 @@ func (s *Service) installProfile(profile *contracts.Profile, binary string, forc
 		result.BackupPath = backup
 	}
 
-	status := statusForSettings(settings, profile.Name)
+	status, disabled := statusForSettings(settings, profile.Name)
 	result.Status = status
+	result.Disabled = disabled
 	result.Installed = status == StatusInstalled
 	if result.Installed {
 		result.Message = "ccx hooks installed"
@@ -166,8 +167,9 @@ func (s *Service) uninstallProfile(profile *contracts.Profile) (Result, error) {
 		result.Message = "no ccx hooks installed"
 	}
 
-	status := statusForSettings(settings, profile.Name)
+	status, disabled := statusForSettings(settings, profile.Name)
 	result.Status = status
+	result.Disabled = disabled
 	result.Installed = status == StatusInstalled
 	return result, nil
 }
@@ -189,7 +191,9 @@ func (s *Service) statusProfile(profile *contracts.Profile) Result {
 		result.Message = "settings.json not found"
 		return result
 	}
-	result.Status = statusForSettings(settings, profile.Name)
+	status, disabled := statusForSettings(settings, profile.Name)
+	result.Status = status
+	result.Disabled = disabled
 	result.Installed = result.Status == StatusInstalled
 	return result
 }
@@ -289,10 +293,13 @@ func removeManagedHooks(settings map[string]any, profile string) (bool, error) {
 	return changed, nil
 }
 
-func statusForSettings(settings map[string]any, profile string) Status {
+func statusForSettings(settings map[string]any, profile string) (Status, bool) {
+	if disabled, ok := boolFromAny(settings["disableAllHooks"]); ok && disabled {
+		return StatusDisabled, true
+	}
 	hooks, err := hooksObject(settings, false)
 	if err != nil || hooks == nil {
-		return StatusPartial
+		return StatusPartial, false
 	}
 	installed := 0
 	for _, spec := range requiredHookSpecs {
@@ -305,9 +312,9 @@ func statusForSettings(settings map[string]any, profile string) Status {
 		}
 	}
 	if installed == len(requiredHookSpecs) {
-		return StatusInstalled
+		return StatusInstalled, false
 	}
-	return StatusPartial
+	return StatusPartial, false
 }
 
 func hooksObject(settings map[string]any, create bool) (map[string]any, error) {
@@ -483,6 +490,11 @@ func isManagedHandler(handler map[string]any, profile string) bool {
 func stringFromAny(v any) (string, bool) {
 	s, ok := v.(string)
 	return s, ok
+}
+
+func boolFromAny(v any) (value, ok bool) {
+	b, ok := v.(bool)
+	return b, ok
 }
 
 func stringsFromAny(v any) ([]string, bool) {

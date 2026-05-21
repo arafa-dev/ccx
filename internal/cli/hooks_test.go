@@ -70,6 +70,42 @@ func TestHooksInstallStatusUninstallJSON(t *testing.T) {
 	}
 }
 
+func TestHooksStatusJSONReportsDisabledHooks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := filepath.Join(home, "claude-work")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, "profile", "add", "work", "--config-dir", cfgDir)
+	runCLI(t, "hooks", "install", "--profile", "work", "--json")
+
+	settingsPath := filepath.Join(cfgDir, "settings.json")
+	data, err := os.ReadFile(settingsPath) //nolint:gosec // test reads a settings file under t.TempDir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatal(err)
+	}
+	settings["disableAllHooks"] = json.RawMessage("true")
+	data, err = json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runCLI(t, "hooks", "status", "--profile", "work", "--json")
+	results := decodeHookResults(t, out)
+	if len(results) != 1 || results[0].Status != hooks.StatusDisabled || results[0].Installed || !results[0].Disabled {
+		t.Fatalf("status results = %+v, want disabled/non-installed", results)
+	}
+}
+
 func TestHooksInstallRejectsMissingProfile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
