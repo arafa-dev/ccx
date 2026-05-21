@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"text/tabwriter"
 
+	"github.com/arafa-dev/ccx/internal/contracts"
 	"github.com/arafa-dev/ccx/internal/headroom"
 	"github.com/spf13/cobra"
 )
@@ -26,10 +29,15 @@ func newSuggestCommand(_ *Options) *cobra.Command {
 			}
 			defer func() { _ = deps.Close() }()
 
-			if err := ingestAllProfiles(ctx, deps); err != nil {
-				return fmt.Errorf("scanning: %w", err)
-			}
 			profiles, err := deps.Profiles.List(ctx)
+			if err != nil {
+				return err
+			}
+			if len(profiles) == 0 {
+				return writeSuggestError(c, asJSON, "no profiles registered")
+			}
+
+			scanFailures, err := ingestSuggestProfiles(ctx, deps, profiles)
 			if err != nil {
 				return err
 			}
@@ -38,16 +46,15 @@ func newSuggestCommand(_ *Options) *cobra.Command {
 				Store:   deps.Store,
 				Pricing: deps.Pricing,
 			}
-			result, err := evaluator.Evaluate(ctx, profiles, headroom.Options{IncludeUnavailable: includeUnavailable})
+			result, err := evaluator.Evaluate(ctx, profiles, headroom.Options{
+				IncludeUnavailable: includeUnavailable,
+				UnavailableReasons: scanFailures,
+			})
 			if err != nil {
 				return err
 			}
 			if result.Recommendation == nil {
-				result.Error = "no recommendable profiles"
-				if asJSON {
-					_ = json.NewEncoder(c.OutOrStdout()).Encode(result)
-				}
-				return fmt.Errorf("no recommendable profiles")
+				return writeSuggestResultError(c, asJSON, result, "no recommendable profiles")
 			}
 			if asJSON {
 				return json.NewEncoder(c.OutOrStdout()).Encode(result)
@@ -58,6 +65,78 @@ func newSuggestCommand(_ *Options) *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON output")
 	cmd.Flags().BoolVar(&includeUnavailable, "include-unavailable", false, "allow auth-failed profiles to be considered")
 	return cmd
+}
+
+func ingestSuggestProfiles(ctx context.Context, deps *Deps, profiles []contracts.Profile) (map[string]string, error) {
+	failures := make(map[string]string)
+	for i := range profiles {
+		p := &profiles[i]
+		if err := deps.Store.SaveProfile(ctx, *p); err != nil {
+			return nil, fmt.Errorf("saving profile %q before scan: %w", p.Name, err)
+		}
+		if err := ingestSuggestProfile(ctx, deps, p); err != nil {
+			failures[p.Name] = fmt.Sprintf("scan failed: %v", err)
+		}
+	}
+	return failures, nil
+}
+
+func ingestSuggestProfile(ctx context.Context, deps *Deps, p *contracts.Profile) error {
+	events, errs := deps.Scanner.Scan(ctx, *p)
+	batch := make([]contracts.Event, 0, 256)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := deps.Store.InsertEvents(ctx, p.Name, batch); err != nil {
+			return err
+		}
+		batch = batch[:0]
+		return nil
+	}
+
+	var scanErr error
+	for events != nil || errs != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev, ok := <-events:
+			if !ok {
+				events = nil
+				if err := flush(); err != nil {
+					return err
+				}
+				continue
+			}
+			batch = append(batch, ev)
+			if len(batch) >= cap(batch) {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			if err != nil && scanErr == nil {
+				scanErr = err
+			}
+		}
+	}
+	return scanErr
+}
+
+func writeSuggestError(c *cobra.Command, asJSON bool, message string) error {
+	return writeSuggestResultError(c, asJSON, headroom.Result{Candidates: []headroom.Candidate{}}, message)
+}
+
+func writeSuggestResultError(c *cobra.Command, asJSON bool, result headroom.Result, message string) error {
+	result.Error = message
+	if asJSON {
+		_ = json.NewEncoder(c.OutOrStdout()).Encode(result)
+	}
+	return errors.New(message)
 }
 
 func renderSuggest(w io.Writer, result headroom.Result) error {

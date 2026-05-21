@@ -140,6 +140,69 @@ func TestSuggestJSONShapeIncludesRecommendationAndCandidates(t *testing.T) {
 	}
 }
 
+func TestSuggestBestEffortIngestsAndEvaluatesInaccessibleProfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	validDir := filepath.Join(home, "claude-valid")
+	badDir := filepath.Join(home, "claude-bad")
+	if err := os.MkdirAll(filepath.Join(validDir, "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(badDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, "profile", "add", "valid", "--config-dir", validDir)
+	runCLI(t, "profile", "add", "bad", "--config-dir", badDir)
+	runCLI(t, "profile", "set", "valid", "--daily-tokens", "1000")
+	runCLI(t, "profile", "set", "bad", "--daily-tokens", "1000", "--priority", "100")
+	if err := os.RemoveAll(badDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(badDir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runCLI(t, "suggest", "--json")
+	payload := decodeSuggestJSON(t, out)
+	if payload.Recommendation == nil || payload.Recommendation.Profile != "valid" {
+		t.Fatalf("recommendation = %+v, want valid", payload.Recommendation)
+	}
+	bad := findSuggestCandidate(t, payload.Candidates, "bad")
+	if bad.Available {
+		t.Fatalf("bad candidate available = true, want false")
+	}
+	if !candidateHasReason(bad, "config dir inaccessible") && !candidateHasReason(bad, "scan failed") {
+		t.Fatalf("bad candidate reasons = %v, want config dir or scan failure", bad.Reasons)
+	}
+}
+
+func TestSuggestEmptyRegistryReportsNoProfiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	stdout, stderr, code := runCLIResult([]string{"suggest", "--json"})
+	if code == 0 {
+		t.Fatalf("suggest --json exit = 0, want non-zero for empty registry")
+	}
+	payload := decodeSuggestJSON(t, stdout)
+	if payload.Error != "no profiles registered" {
+		t.Fatalf("json error = %q, want no profiles registered; stderr=%q", payload.Error, stderr)
+	}
+	if len(payload.Candidates) != 0 {
+		t.Fatalf("candidates = %+v, want empty", payload.Candidates)
+	}
+
+	_, stderr, code = runCLIResult([]string{"suggest"})
+	if code == 0 {
+		t.Fatalf("suggest exit = 0, want non-zero for empty registry")
+	}
+	if !strings.Contains(stderr, "no profiles registered") {
+		t.Fatalf("stderr = %q, want no profiles registered", stderr)
+	}
+}
+
 func decodeSuggestJSON(t *testing.T, out string) headroom.Result {
 	t.Helper()
 	var payload headroom.Result
@@ -147,6 +210,15 @@ func decodeSuggestJSON(t *testing.T, out string) headroom.Result {
 		t.Fatalf("invalid suggest JSON: %v\n%s", err, out)
 	}
 	return payload
+}
+
+func candidateHasReason(candidate headroom.Candidate, want string) bool {
+	for _, reason := range candidate.Reasons {
+		if strings.Contains(reason, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func findSuggestCandidate(t *testing.T, candidates []headroom.Candidate, name string) headroom.Candidate {

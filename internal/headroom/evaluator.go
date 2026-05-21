@@ -28,6 +28,7 @@ type Store interface {
 // Options controls evaluation gates.
 type Options struct {
 	IncludeUnavailable bool
+	UnavailableReasons map[string]string
 }
 
 // Evaluator computes advisory rankings from profile configuration and recent telemetry.
@@ -108,6 +109,10 @@ func (e Evaluator) evaluateProfile(ctx context.Context, p *contracts.Profile, no
 	if err := e.checkConfigDir(p.ConfigDir); err != nil {
 		c.Available = false
 		c.Reasons = append(c.Reasons, fmt.Sprintf("config dir inaccessible: %v", err))
+	}
+	if reason := opts.UnavailableReasons[p.Name]; reason != "" {
+		c.Available = false
+		c.Reasons = append(c.Reasons, reason)
 	}
 
 	health, haveHealth, err := e.profileHealth(ctx, p.Name)
@@ -328,7 +333,7 @@ func headroomPercent(limits contracts.ProfileLimits, usage usageSummary) float64
 	if limits.MonthlyUSDBudget > 0 {
 		minHeadroom = min(minHeadroom, 1-(usage.usd30d/limits.MonthlyUSDBudget))
 	}
-	return round2(clamp(minHeadroom*100, -100, 100))
+	return round2(min(minHeadroom*100, 100))
 }
 
 func hasBudget(limits contracts.ProfileLimits) bool {

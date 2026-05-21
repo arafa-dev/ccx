@@ -53,6 +53,30 @@ func TestOverBudgetProfileRanksBelowProfileWithHeadroom(t *testing.T) {
 	}
 }
 
+func TestHeavilyOverBudgetProfilesRankByActualNegativeHeadroom(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	store.addUsage("less-over", now.Add(-time.Hour), "free", contracts.Usage{InputTokens: 3000})
+	store.addUsage("more-over", now.Add(-time.Hour), "free", contracts.Usage{InputTokens: 10_000})
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("less-over", contracts.ProfileLimits{DailyTokenBudget: 1000}),
+		profile("more-over", contracts.ProfileLimits{DailyTokenBudget: 1000, Priority: 50}),
+	})
+
+	if result.Recommendation == nil || result.Recommendation.Profile != "less-over" {
+		t.Fatalf("recommendation = %+v, want less-over", result.Recommendation)
+	}
+	less := mustCandidate(t, result, "less-over")
+	more := mustCandidate(t, result, "more-over")
+	if less.HeadroomPercent != -200 || more.HeadroomPercent != -900 {
+		t.Fatalf("headroom = %.2f/%.2f, want -200/-900", less.HeadroomPercent, more.HeadroomPercent)
+	}
+	if less.Score <= more.Score {
+		t.Fatalf("less-over score %.2f should be greater than more-over score %.2f", less.Score, more.Score)
+	}
+}
+
 func TestRateLimitFailureInsideCooldownExcludesProfileAndReportsCooldown(t *testing.T) {
 	now := testNow()
 	store := newFakeStore(now)
