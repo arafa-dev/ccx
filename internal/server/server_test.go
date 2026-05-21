@@ -39,6 +39,23 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestSecurityHeadersAllowNextInlineBootScripts(t *testing.T) {
+	srv := server.New(server.Deps{Store: &mockStore{}, Pricing: &mockPricing{}}, "test")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	res, err := ts.Client().Get(ts.URL + "/api/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	csp := res.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
+		t.Fatalf("CSP = %q, want script-src to allow Next.js inline boot scripts", csp)
+	}
+}
+
 func TestProfilesEndpointReportsUsageQueryErrors(t *testing.T) {
 	srv := server.New(server.Deps{
 		Store:   &mockStore{queryErr: errors.New("store unavailable")},
