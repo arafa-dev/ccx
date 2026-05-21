@@ -7,10 +7,32 @@ describe('api client', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
-  it('exposes the API base URL, defaulting to 127.0.0.1:7777', () => {
-    expect(apiBaseUrl()).toMatch(/^https?:\/\//);
+  it('defaults to same-origin API paths', async () => {
+    vi.stubEnv('NEXT_PUBLIC_API_BASE', '');
+    const spy = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true, version: '0.1.0-dev' }), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    global.fetch = spy as unknown as typeof fetch;
+
+    expect(apiBaseUrl()).toBe('');
+
+    await getHealth();
+
+    expect(spy).toHaveBeenCalledWith('/api/health', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+  });
+
+  it('uses NEXT_PUBLIC_API_BASE when configured', () => {
+    vi.stubEnv('NEXT_PUBLIC_API_BASE', 'http://127.0.0.1:7777/');
+
+    expect(apiBaseUrl()).toBe('http://127.0.0.1:7777');
   });
 
   it('getHealth parses { ok, version } from /api/health', async () => {

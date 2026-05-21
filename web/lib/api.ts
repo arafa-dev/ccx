@@ -23,15 +23,13 @@ export interface GetUsageParams {
   since?: string;
 }
 
-const DEFAULT_BASE = 'http://127.0.0.1:7777';
-
-/** API base URL. Reads NEXT_PUBLIC_API_BASE at build time, falls back to localhost. */
+/** API base URL. Reads NEXT_PUBLIC_API_BASE at build time, falls back to same-origin. */
 export function apiBaseUrl(): string {
   const env =
     typeof process !== 'undefined'
       ? process.env.NEXT_PUBLIC_API_BASE
       : undefined;
-  return (env && env.length > 0 ? env : DEFAULT_BASE).replace(/\/$/, '');
+  return (env && env.length > 0 ? env : '').replace(/\/$/, '');
 }
 
 async function getJSON<T>(path: string): Promise<T> {
