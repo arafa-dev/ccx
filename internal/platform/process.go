@@ -22,6 +22,11 @@ func (OSProcessManager) Alive(pid int) bool {
 	return ProcessAlive(pid)
 }
 
+// Matches reports whether pid appears to be running expectedExecutable.
+func (OSProcessManager) Matches(pid int, expectedExecutable string) bool {
+	return ProcessMatches(pid, expectedExecutable)
+}
+
 // Terminate asks pid to exit gracefully where the platform supports it.
 func (OSProcessManager) Terminate(pid int) error {
 	return TerminateProcess(pid)
@@ -39,6 +44,14 @@ func ProcessAlive(pid int) bool {
 		return false
 	}
 	return processAliveOS(pid)
+}
+
+// ProcessMatches reports whether pid appears to be running expectedExecutable.
+func ProcessMatches(pid int, expectedExecutable string) bool {
+	if pid <= 0 || expectedExecutable == "" {
+		return false
+	}
+	return processMatchesOS(pid, expectedExecutable)
 }
 
 // TerminateProcess asks pid to exit gracefully where the platform supports it.

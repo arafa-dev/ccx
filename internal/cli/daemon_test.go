@@ -227,6 +227,10 @@ func (f *cliFakeProcess) Alive(pid int) bool {
 	return f.alive[pid]
 }
 
+func (f *cliFakeProcess) Matches(int, string) bool {
+	return true
+}
+
 func (f *cliFakeProcess) StartDetached(_ context.Context, spec *daemon.StartProcessSpec) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

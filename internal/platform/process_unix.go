@@ -7,12 +7,43 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
 func processAliveOS(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
+}
+
+func processMatchesOS(pid int, expectedExecutable string) bool {
+	if runtime.GOOS == "linux" {
+		exe, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
+		if err == nil {
+			return sameExecutablePath(exe, expectedExecutable)
+		}
+	}
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output() //nolint:gosec // Command is constant and pid is an int.
+	if err != nil {
+		return false
+	}
+	got := strings.TrimSpace(string(out))
+	return got != "" && (sameExecutablePath(got, expectedExecutable) || filepath.Base(got) == filepath.Base(expectedExecutable))
+}
+
+func sameExecutablePath(a, b string) bool {
+	cleanA, errA := filepath.EvalSymlinks(a)
+	if errA != nil {
+		cleanA = filepath.Clean(a)
+	}
+	cleanB, errB := filepath.EvalSymlinks(b)
+	if errB != nil {
+		cleanB = filepath.Clean(b)
+	}
+	return cleanA == cleanB
 }
 
 func terminateProcessOS(pid int) error {

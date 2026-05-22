@@ -80,6 +80,7 @@ func removeRuntimeState(paths *Paths) {
 	_ = os.Remove(paths.StatusPath + ".tmp")
 }
 
-func removeLock(paths *Paths) {
-	_ = os.Remove(paths.LockPath)
+func removeLock(paths *Paths, token string) {
+	lock := &daemonLock{path: paths.LockPath, token: token, owned: token != ""}
+	lock.release()
 }

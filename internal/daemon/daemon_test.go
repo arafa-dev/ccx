@@ -163,9 +163,8 @@ func TestStartDetachedReportsBusyWhenStartLockActiveAndRecoversStaleLock(t *test
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(lockPath, []byte("starting\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	paths := RuntimePaths(root)
+	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "active-token", PID: 111, CreatedAt: time.Now().UTC()})
 
 	busy, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
 	if err == nil {
@@ -179,6 +178,7 @@ func TestStartDetachedReportsBusyWhenStartLockActiveAndRecoversStaleLock(t *test
 	}
 
 	old := time.Now().Add(-2 * time.Hour)
+	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "stale-token", PID: 111, CreatedAt: old})
 	if err := os.Chtimes(lockPath, old, old); err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +236,103 @@ func TestStartDetachedTimeoutDoesNotReportPIDOnlyAsRunning(t *testing.T) {
 	}
 	if result.Status.Running || result.Status.URL != "" {
 		t.Fatalf("pid-only timeout status = %+v", result.Status)
+	}
+}
+
+func TestStartDetachedTimeoutWithLiveChildPreservesLock(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	proc.nextPID = 7654
+	proc.keepAliveOnTerminate = true
+	proc.onStart = func(spec *StartProcessSpec, pid int) {
+		writePIDFile(t, spec.Root, pid)
+	}
+	c := Controller{
+		Root:           root,
+		Version:        "test",
+		Executable:     "/bin/ccx",
+		Process:        proc,
+		StartupTimeout: 50 * time.Millisecond,
+		StopTimeout:    50 * time.Millisecond,
+	}
+
+	first, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected first start to time out")
+	}
+	if !first.Started || first.Status.PID != 7654 {
+		t.Fatalf("first result = %+v", first)
+	}
+	if _, err := os.Stat(filepath.Join(root, "daemon.lock")); err != nil {
+		t.Fatalf("expected lock to remain while child is alive: %v", err)
+	}
+
+	proc.nextPID = 8765
+	second, err := c.StartDetached(ctx, StartOptions{Port: 7778, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected second start to be blocked by preserved lock")
+	}
+	if !strings.Contains(err.Error(), "daemon start already in progress") {
+		t.Fatalf("second error = %v", err)
+	}
+	if second.Started || proc.startCalls != 1 {
+		t.Fatalf("second result = %+v startCalls=%d", second, proc.startCalls)
+	}
+}
+
+func TestStatusWithLiveNonDaemonPIDReportsNotRunning(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	c := Controller{Root: root, Version: "test", Process: proc}
+	writeStatusFile(t, root, contracts.DaemonStatus{
+		PID:            1357,
+		Version:        "test",
+		Port:           7777,
+		URL:            "http://127.0.0.1:7777",
+		ExecutablePath: "/bin/ccx",
+		Running:        true,
+	})
+	writePIDFile(t, root, 1357)
+	proc.setAlive(1357, true)
+	proc.setMatches(1357, false)
+
+	status, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Running {
+		t.Fatalf("identity mismatch status running = true: %+v", status)
+	}
+}
+
+func TestStopWithLiveNonDaemonPIDDoesNotTerminate(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	c := Controller{Root: root, Version: "test", Process: proc}
+	writeStatusFile(t, root, contracts.DaemonStatus{
+		PID:            2469,
+		Version:        "test",
+		Port:           7777,
+		URL:            "http://127.0.0.1:7777",
+		ExecutablePath: "/bin/ccx",
+		Running:        true,
+	})
+	writePIDFile(t, root, 2469)
+	proc.setAlive(2469, true)
+	proc.setMatches(2469, false)
+
+	stopped, err := c.Stop(ctx)
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if stopped.Stopped {
+		t.Fatalf("stop result = %+v, want not stopped", stopped)
+	}
+	if proc.terminateCalls != 0 {
+		t.Fatalf("terminateCalls = %d, want 0", proc.terminateCalls)
 	}
 }
 
@@ -375,22 +472,31 @@ func TestWatchDebounceAppendedJSONLUpdatesUsageWithoutRestart(t *testing.T) {
 }
 
 type fakeProcessManager struct {
-	mu             sync.Mutex
-	alive          map[int]bool
-	nextPID        int
-	startCalls     int
-	terminateCalls int
-	onStart        func(*StartProcessSpec, int)
+	mu                   sync.Mutex
+	alive                map[int]bool
+	matches              map[int]bool
+	nextPID              int
+	startCalls           int
+	terminateCalls       int
+	keepAliveOnTerminate bool
+	onStart              func(*StartProcessSpec, int)
 }
 
 func newFakeProcessManager() *fakeProcessManager {
-	return &fakeProcessManager{alive: map[int]bool{}, nextPID: 1000}
+	return &fakeProcessManager{alive: map[int]bool{}, matches: map[int]bool{}, nextPID: 1000}
 }
 
 func (f *fakeProcessManager) Alive(pid int) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.alive[pid]
+}
+
+func (f *fakeProcessManager) Matches(pid int, _ string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	matches, ok := f.matches[pid]
+	return !ok || matches
 }
 
 func (f *fakeProcessManager) StartDetached(_ context.Context, spec *StartProcessSpec) (int, error) {
@@ -409,7 +515,9 @@ func (f *fakeProcessManager) Terminate(pid int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.terminateCalls++
-	f.alive[pid] = false
+	if !f.keepAliveOnTerminate {
+		f.alive[pid] = false
+	}
 	return nil
 }
 
@@ -417,6 +525,12 @@ func (f *fakeProcessManager) setAlive(pid int, alive bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.alive[pid] = alive
+}
+
+func (f *fakeProcessManager) setMatches(pid int, matches bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.matches[pid] = matches
 }
 
 type sessionLine struct {

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -28,6 +30,23 @@ func processAliveOS(pid int) bool {
 		return false
 	}
 	return code == stillActive
+}
+
+func processMatchesOS(pid int, expectedExecutable string) bool {
+	cmd := exec.Command("wmic", "process", "where", "processid="+strconv.Itoa(pid), "get", "ExecutablePath", "/value") //nolint:gosec // Command is constant and pid is an int.
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "ExecutablePath=") {
+			continue
+		}
+		got := strings.TrimPrefix(line, "ExecutablePath=")
+		return strings.EqualFold(filepath.Clean(got), filepath.Clean(expectedExecutable))
+	}
+	return false
 }
 
 func terminateProcessOS(pid int) error {

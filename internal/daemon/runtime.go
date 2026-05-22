@@ -44,9 +44,9 @@ func Run(ctx context.Context, opts RunOptions) error {
 	}
 	var lock *daemonLock
 	if os.Getenv(envLockHeldByParent) == "1" {
-		lock, err = adoptDaemonLock(&paths)
+		lock, err = adoptDaemonLock(&paths, os.Getenv(envLockToken))
 	} else {
-		lock, err = acquireDaemonLock(&paths, defaultLockStaleAfter)
+		lock, err = acquireDaemonLock(&paths, defaultLockStaleAfter, "")
 	}
 	if err != nil {
 		return err
@@ -60,6 +60,10 @@ func Run(ctx context.Context, opts RunOptions) error {
 	defer func() { _ = logFile.Close() }()
 	logger := log.New(logFile, "", log.LstdFlags|log.LUTC)
 	logger.Printf("daemon starting root=%s", root)
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate executable: %w", err)
+	}
 
 	runCtx, stopSignals := signalContext(ctx)
 	defer stopSignals()
@@ -118,6 +122,8 @@ func Run(ctx context.Context, opts RunOptions) error {
 		URL:             fmt.Sprintf("http://127.0.0.1:%d", boundPort),
 		DBPath:          paths.DBPath,
 		LogPath:         paths.LogPath,
+		ExecutablePath:  exe,
+		StartToken:      lock.token,
 		ProfilesWatched: len(profiles),
 		Running:         true,
 	}

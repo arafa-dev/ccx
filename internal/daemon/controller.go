@@ -25,6 +25,7 @@ const (
 // ProcessManager abstracts process operations for lifecycle tests.
 type ProcessManager interface {
 	Alive(pid int) bool
+	Matches(pid int, expectedExecutable string) bool
 	StartDetached(ctx context.Context, spec *StartProcessSpec) (int, error)
 	Terminate(pid int) error
 }
@@ -34,6 +35,7 @@ type ProcessManager interface {
 type StartProcessSpec struct {
 	Root       string
 	Version    string
+	StartToken string
 	Executable string
 	Args       []string
 	Env        []string
@@ -88,6 +90,12 @@ func (c *Controller) Status(_ context.Context) (contracts.DaemonStatus, error) {
 	}
 	c.fillStatusDefaults(&paths, &status)
 	status.Running = hasStatus && status.PID > 0 && status.URL != "" && c.process().Alive(status.PID)
+	if status.Running {
+		expectedExecutable, err := c.expectedExecutable(status.ExecutablePath)
+		if err != nil || expectedExecutable == "" || !c.process().Matches(status.PID, expectedExecutable) {
+			status.Running = false
+		}
+	}
 	return status, nil
 }
 
@@ -113,7 +121,11 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 		return StartResult{Status: status, AlreadyRunning: true}, nil
 	}
 
-	lock, err := acquireDaemonLock(&paths, c.lockStaleAfter())
+	token, err := newLockToken()
+	if err != nil {
+		return StartResult{}, err
+	}
+	lock, err := acquireDaemonLock(&paths, c.lockStaleAfter(), token)
 	if err != nil {
 		status, statusErr := c.Status(ctx)
 		if statusErr != nil {
@@ -158,9 +170,10 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 	spec := &StartProcessSpec{
 		Root:       root,
 		Version:    c.Version,
+		StartToken: token,
 		Executable: exe,
 		Args:       args,
-		Env:        append(os.Environ(), envLockHeldByParent+"=1"),
+		Env:        append(os.Environ(), envLockHeldByParent+"=1", envLockToken+"="+token),
 		LogPath:    paths.LogPath,
 	}
 	pid, err := c.process().StartDetached(ctx, spec)
@@ -171,6 +184,10 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 	status, err = c.waitForReadyStatus(ctx, pid)
 	if err != nil {
 		_ = c.process().Terminate(pid)
+		if !c.waitForProcessDeath(ctx, pid) {
+			lock.disown()
+			releaseLock = false
+		}
 		return StartResult{Status: status, Started: true}, err
 	}
 	lock.disown()
@@ -197,7 +214,7 @@ func (c *Controller) Stop(ctx context.Context) (StopResult, error) {
 				return StopResult{}, err
 			}
 			removePIDIf(&paths, status.PID)
-			removeLock(&paths)
+			removeLock(&paths, status.StartToken)
 		}
 		return StopResult{Status: status}, nil
 	}
@@ -214,7 +231,7 @@ func (c *Controller) Stop(ctx context.Context) (StopResult, error) {
 				return StopResult{}, err
 			}
 			removePIDIf(&paths, status.PID)
-			removeLock(&paths)
+			removeLock(&paths, status.StartToken)
 			return StopResult{Status: status, Stopped: true}, nil
 		}
 		select {
@@ -265,6 +282,21 @@ func (c *Controller) waitForReadyStatus(ctx context.Context, pid int) (contracts
 	return last, fmt.Errorf("daemon did not become ready within %s", timeout)
 }
 
+func (c *Controller) waitForProcessDeath(ctx context.Context, pid int) bool {
+	deadline := time.Now().Add(c.stopTimeout())
+	for time.Now().Before(deadline) {
+		if !c.process().Alive(pid) {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(statusPollInterval):
+		}
+	}
+	return !c.process().Alive(pid)
+}
+
 func (c *Controller) root() (string, error) {
 	if c.Root != "" {
 		return c.Root, nil
@@ -293,6 +325,16 @@ func (c *Controller) lockStaleAfter() time.Duration {
 	return defaultLockStaleAfter
 }
 
+func (c *Controller) expectedExecutable(statusExecutable string) (string, error) {
+	if statusExecutable != "" {
+		return statusExecutable, nil
+	}
+	if c.Executable != "" {
+		return c.Executable, nil
+	}
+	return os.Executable()
+}
+
 func (c *Controller) fillStatusDefaults(paths *Paths, status *contracts.DaemonStatus) {
 	if status.Version == "" {
 		status.Version = c.Version
@@ -312,6 +354,10 @@ type osProcessManager struct{}
 
 func (osProcessManager) Alive(pid int) bool {
 	return platform.ProcessAlive(pid)
+}
+
+func (osProcessManager) Matches(pid int, expectedExecutable string) bool {
+	return platform.ProcessMatches(pid, expectedExecutable)
 }
 
 func (osProcessManager) StartDetached(ctx context.Context, spec *StartProcessSpec) (int, error) {
