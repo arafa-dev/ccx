@@ -413,6 +413,39 @@ func TestStartDetachedSetChildPIDFailureKeepsLockWhileChildAlive(t *testing.T) {
 	}
 }
 
+func TestStartDetachedSetChildPIDFailureDoesNotTerminateReusedPID(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	proc.nextPID = 8643
+	proc.skipAsyncLockAdopt = true
+	proc.setIdentity(8643, "reuse-after-first-lookup")
+	restore := setSetChildPIDErrorHookForTest(errors.New("claim failed"))
+	defer restore()
+	c := Controller{
+		Root:           root,
+		Version:        "test",
+		Executable:     "/bin/ccx",
+		Process:        proc,
+		StartupTimeout: 50 * time.Millisecond,
+		StopTimeout:    50 * time.Millisecond,
+	}
+
+	first, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected setChildPID failure")
+	}
+	if first.Started {
+		t.Fatalf("first result = %+v, want not started", first)
+	}
+	if proc.terminateCalls != 0 {
+		t.Fatalf("terminateCalls = %d, want 0 for reused pid", proc.terminateCalls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "daemon.lock")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lock after identity mismatch cleanup err = %v, want removed", err)
+	}
+}
+
 func TestStartDetachedTimeoutWithLiveChildPreservesLock(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -866,6 +899,7 @@ type fakeProcessManager struct {
 	alive                map[int]bool
 	matches              map[int]bool
 	identities           map[int]string
+	identityCalls        map[int]int
 	nextPID              int
 	startCalls           int
 	terminateCalls       int
@@ -876,7 +910,13 @@ type fakeProcessManager struct {
 }
 
 func newFakeProcessManager() *fakeProcessManager {
-	return &fakeProcessManager{alive: map[int]bool{}, matches: map[int]bool{}, identities: map[int]string{}, nextPID: 1000}
+	return &fakeProcessManager{
+		alive:         map[int]bool{},
+		matches:       map[int]bool{},
+		identities:    map[int]string{},
+		identityCalls: map[int]int{},
+		nextPID:       1000,
+	}
 }
 
 func (f *fakeProcessManager) Alive(pid int) bool {
@@ -898,7 +938,14 @@ func (f *fakeProcessManager) Identity(pid int) (string, bool) {
 	if !f.alive[pid] {
 		return "", false
 	}
+	f.identityCalls[pid]++
 	if identity, ok := f.identities[pid]; ok {
+		if identity == "reuse-after-first-lookup" {
+			if f.identityCalls[pid] == 1 {
+				return testProcessIdentity(pid), true
+			}
+			return "reused-process", true
+		}
 		return identity, true
 	}
 	return testProcessIdentity(pid), true
@@ -909,7 +956,9 @@ func (f *fakeProcessManager) StartDetached(_ context.Context, spec *StartProcess
 	f.startCalls++
 	pid := f.nextPID
 	f.alive[pid] = true
-	f.identities[pid] = testProcessIdentity(pid)
+	if _, ok := f.identities[pid]; !ok {
+		f.identities[pid] = testProcessIdentity(pid)
+	}
 	onStart := f.onStart
 	if f.startErr != nil {
 		err := f.startErr

@@ -185,13 +185,15 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 	pid, err := c.process().StartDetached(ctx, spec)
 	if err != nil {
 		if pid > 0 {
-			_ = lock.setChildPID(pid, c.processIdentity(pid))
-			c.terminateSpawnedChildOrPreserveLock(ctx, pid, lock, &releaseLock)
+			childIdentity := c.processIdentity(pid)
+			_ = lock.setChildPID(pid, childIdentity)
+			c.terminateSpawnedChildOrPreserveLock(ctx, pid, childIdentity, lock, &releaseLock)
 		}
 		return StartResult{}, fmt.Errorf("start detached daemon: %w", err)
 	}
-	if err := lock.setChildPID(pid, c.processIdentity(pid)); err != nil {
-		c.terminateSpawnedChildOrPreserveLock(ctx, pid, lock, &releaseLock)
+	childIdentity := c.processIdentity(pid)
+	if err := lock.setChildPID(pid, childIdentity); err != nil {
+		c.terminateSpawnedChildOrPreserveLock(ctx, pid, childIdentity, lock, &releaseLock)
 		return StartResult{}, err
 	}
 
@@ -200,7 +202,7 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 		if status.PID == 0 {
 			status.PID = pid
 		}
-		c.terminateSpawnedChildOrPreserveLock(ctx, pid, lock, &releaseLock)
+		c.terminateSpawnedChildOrPreserveLock(ctx, pid, childIdentity, lock, &releaseLock)
 		return StartResult{Status: status, Started: true}, err
 	}
 	lock.disown()
@@ -295,10 +297,10 @@ func (c *Controller) waitForReadyStatus(ctx context.Context, pid int) (contracts
 	return last, fmt.Errorf("daemon did not become ready within %s", timeout)
 }
 
-func (c *Controller) waitForProcessDeath(ctx context.Context, pid int) bool {
+func (c *Controller) waitForProcessDeath(ctx context.Context, pid int, identity string) bool {
 	deadline := time.Now().Add(c.stopTimeout())
 	for time.Now().Before(deadline) {
-		if !c.process().Alive(pid) {
+		if !c.processOwns(pid, identity) {
 			return true
 		}
 		select {
@@ -307,17 +309,21 @@ func (c *Controller) waitForProcessDeath(ctx context.Context, pid int) bool {
 		case <-time.After(statusPollInterval):
 		}
 	}
-	return !c.process().Alive(pid)
+	return !c.processOwns(pid, identity)
 }
 
-func (c *Controller) terminateSpawnedChildOrPreserveLock(ctx context.Context, pid int, lock *daemonLock, releaseLock *bool) {
+func (c *Controller) terminateSpawnedChildOrPreserveLock(ctx context.Context, pid int, identity string, lock *daemonLock, releaseLock *bool) {
+	if !c.processOwns(pid, identity) {
+		lock.releaseChildPID(pid, identity)
+		return
+	}
 	_ = c.process().Terminate(pid)
-	if !c.waitForProcessDeath(ctx, pid) {
+	if !c.waitForProcessDeath(ctx, pid, identity) {
 		lock.disown()
 		*releaseLock = false
 		return
 	}
-	lock.releaseChildPID(pid)
+	lock.releaseChildPID(pid, identity)
 }
 
 func statusLockMatches(paths *Paths, status *contracts.DaemonStatus) bool {

@@ -311,12 +311,15 @@ func (l *daemonLock) release() {
 	l.owned = false
 }
 
-func (l *daemonLock) releaseChildPID(childPID int) {
+func (l *daemonLock) releaseChildPID(childPID int, childIdentity string) {
 	if l == nil || !l.owned || childPID <= 0 {
 		return
 	}
 	record, observed, err := readLockRecord(l.path)
-	if err == nil && record.Token == l.token && record.PID == childPID {
+	if err == nil &&
+		record.Token == l.token &&
+		record.PID == childPID &&
+		lockIdentityMatches(record.ProcessIdentity, childIdentity) {
 		_, _ = removeObservedLock(l.path, observed)
 	}
 }
