@@ -3,6 +3,8 @@ package platform
 import (
 	"context"
 	"os"
+	"os/exec"
+	"time"
 )
 
 // DetachedProcessSpec describes a child process that should outlive ccx.
@@ -66,4 +68,20 @@ func TerminateProcess(pid int) error {
 // ccx invocation and returns the child pid.
 func StartDetachedProcess(ctx context.Context, spec *DetachedProcessSpec) (int, error) {
 	return startDetachedProcessOS(ctx, spec)
+}
+
+func cleanupStartedProcess(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Kill()
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
 }

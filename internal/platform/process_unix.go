@@ -71,6 +71,7 @@ func startDetachedProcessOS(ctx context.Context, spec *DetachedProcessSpec) (int
 	}
 	pid := cmd.Process.Pid
 	if err := cmd.Process.Release(); err != nil {
+		cleanupStartedProcess(cmd)
 		return 0, err
 	}
 	return pid, nil

@@ -233,10 +233,10 @@ func (f *cliFakeProcess) Matches(int, string) bool {
 
 func (f *cliFakeProcess) StartDetached(_ context.Context, spec *daemon.StartProcessSpec) (int, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.startCalls++
 	pid := f.nextPID
 	f.alive[pid] = true
+	f.mu.Unlock()
 	port := 7777
 	for i, arg := range spec.Args {
 		if arg == "--port" && i+1 < len(spec.Args) {
@@ -245,17 +245,22 @@ func (f *cliFakeProcess) StartDetached(_ context.Context, spec *daemon.StartProc
 			}
 		}
 	}
-	writeDaemonRuntimeLocked(spec.Root, contracts.DaemonStatus{
-		PID:             pid,
-		Version:         spec.Version,
-		StartedAt:       time.Now().UTC(),
-		Port:            port,
-		URL:             "http://127.0.0.1:" + strconv.Itoa(port),
-		DBPath:          filepath.Join(spec.Root, "state.db"),
-		LogPath:         spec.LogPath,
-		ProfilesWatched: 0,
-		Running:         true,
-	})
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		writeDaemonRuntimeLocked(spec.Root, contracts.DaemonStatus{
+			PID:             pid,
+			Version:         spec.Version,
+			StartedAt:       time.Now().UTC(),
+			Port:            port,
+			URL:             "http://127.0.0.1:" + strconv.Itoa(port),
+			DBPath:          filepath.Join(spec.Root, "state.db"),
+			LogPath:         spec.LogPath,
+			ExecutablePath:  spec.Executable,
+			StartToken:      spec.StartToken,
+			ProfilesWatched: 0,
+			Running:         true,
+		})
+	}()
 	return pid, nil
 }
 
@@ -281,7 +286,18 @@ func writeDaemonRuntime(t *testing.T, root string, status contracts.DaemonStatus
 func writeDaemonRuntimeLocked(root string, status contracts.DaemonStatus) {
 	paths := daemon.RuntimePaths(root)
 	_ = os.MkdirAll(root, 0o700)
+	if status.Running && status.StartToken == "" {
+		status.StartToken = "test-token"
+	}
 	data, _ := json.Marshal(status)
 	_ = os.WriteFile(paths.StatusPath, data, 0o600)
 	_ = os.WriteFile(paths.PIDPath, []byte(strconv.Itoa(status.PID)+"\n"), 0o600)
+	if status.Running && status.StartToken != "" {
+		lockData, _ := json.Marshal(map[string]any{
+			"token":      status.StartToken,
+			"pid":        status.PID,
+			"created_at": time.Now().UTC(),
+		})
+		_ = os.WriteFile(paths.LockPath, append(lockData, '\n'), 0o600)
+	}
 }

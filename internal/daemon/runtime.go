@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
@@ -44,9 +45,10 @@ func Run(ctx context.Context, opts RunOptions) error {
 	}
 	var lock *daemonLock
 	if os.Getenv(envLockHeldByParent) == "1" {
-		lock, err = adoptDaemonLock(&paths, os.Getenv(envLockToken))
+		parentPID, _ := strconv.Atoi(os.Getenv(envLockParentPID))
+		lock, err = adoptDaemonLockWithRetry(ctx, &paths, os.Getenv(envLockToken), parentPID, os.Getpid(), defaultStartupWait)
 	} else {
-		lock, err = acquireDaemonLock(&paths, defaultLockStaleAfter, "")
+		lock, err = acquireDaemonLock(&paths, defaultLockStaleAfter, "", platform.ProcessAlive)
 	}
 	if err != nil {
 		return err

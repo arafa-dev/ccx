@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -37,16 +38,20 @@ func TestStatusHandlesMissingRunningAndStaleRuntimeFiles(t *testing.T) {
 
 	started := time.Now().UTC().Truncate(time.Second)
 	writeStatusFile(t, root, contracts.DaemonStatus{
-		PID:       1234,
-		Version:   "test",
-		StartedAt: started,
-		Port:      7777,
-		URL:       "http://127.0.0.1:7777",
-		DBPath:    filepath.Join(root, "state.db"),
-		LogPath:   filepath.Join(root, "daemon.log"),
-		Running:   true,
+		PID:            1234,
+		Version:        "test",
+		StartedAt:      started,
+		Port:           7777,
+		URL:            "http://127.0.0.1:7777",
+		DBPath:         filepath.Join(root, "state.db"),
+		LogPath:        filepath.Join(root, "daemon.log"),
+		ExecutablePath: "/bin/ccx",
+		StartToken:     "token-1234",
+		Running:        true,
 	})
 	writePIDFile(t, root, 1234)
+	paths := RuntimePaths(root)
+	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "token-1234", PID: 1234, CreatedAt: time.Now().UTC()})
 	proc.setAlive(1234, true)
 
 	running, err := c.Status(ctx)
@@ -103,13 +108,17 @@ func TestStartDetachedRefusesDuplicateAndReplacesStalePID(t *testing.T) {
 	}
 
 	writeStatusFile(t, root, contracts.DaemonStatus{
-		PID:     1234,
-		Version: "test",
-		Port:    7777,
-		URL:     "http://127.0.0.1:7777",
-		Running: true,
+		PID:            1234,
+		Version:        "test",
+		Port:           7777,
+		URL:            "http://127.0.0.1:7777",
+		ExecutablePath: "/bin/ccx",
+		StartToken:     "token-1234",
+		Running:        true,
 	})
 	writePIDFile(t, root, 1234)
+	paths := RuntimePaths(root)
+	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "token-1234", PID: 1234, CreatedAt: time.Now().UTC()})
 	proc.setAlive(1234, true)
 
 	dup, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
@@ -124,14 +133,16 @@ func TestStartDetachedRefusesDuplicateAndReplacesStalePID(t *testing.T) {
 	proc.onStart = func(spec *StartProcessSpec, pid int) {
 		writePIDFile(t, spec.Root, pid)
 		writeStatusFile(t, spec.Root, contracts.DaemonStatus{
-			PID:       pid,
-			Version:   spec.Version,
-			Port:      7778,
-			URL:       "http://127.0.0.1:7778",
-			DBPath:    filepath.Join(spec.Root, "state.db"),
-			LogPath:   spec.LogPath,
-			Running:   true,
-			StartedAt: time.Now().UTC(),
+			PID:            pid,
+			Version:        spec.Version,
+			Port:           7778,
+			URL:            "http://127.0.0.1:7778",
+			DBPath:         filepath.Join(spec.Root, "state.db"),
+			LogPath:        spec.LogPath,
+			ExecutablePath: spec.Executable,
+			StartToken:     spec.StartToken,
+			Running:        true,
+			StartedAt:      time.Now().UTC(),
 		})
 	}
 
@@ -185,14 +196,16 @@ func TestStartDetachedReportsBusyWhenStartLockActiveAndRecoversStaleLock(t *test
 	proc.onStart = func(spec *StartProcessSpec, pid int) {
 		writePIDFile(t, spec.Root, pid)
 		writeStatusFile(t, spec.Root, contracts.DaemonStatus{
-			PID:       pid,
-			Version:   spec.Version,
-			Port:      7777,
-			URL:       "http://127.0.0.1:7777",
-			DBPath:    filepath.Join(spec.Root, "state.db"),
-			LogPath:   spec.LogPath,
-			Running:   true,
-			StartedAt: time.Now().UTC(),
+			PID:            pid,
+			Version:        spec.Version,
+			Port:           7777,
+			URL:            "http://127.0.0.1:7777",
+			DBPath:         filepath.Join(spec.Root, "state.db"),
+			LogPath:        spec.LogPath,
+			ExecutablePath: spec.Executable,
+			StartToken:     spec.StartToken,
+			Running:        true,
+			StartedAt:      time.Now().UTC(),
 		})
 	}
 
@@ -205,6 +218,39 @@ func TestStartDetachedReportsBusyWhenStartLockActiveAndRecoversStaleLock(t *test
 	}
 	if _, err := os.Stat(lockPath); err != nil {
 		t.Fatalf("lock file after successful start: %v", err)
+	}
+}
+
+func TestStartDetachedOldLockWithLiveOwnerBlocks(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	c := Controller{
+		Root:           root,
+		Version:        "test",
+		Executable:     "/bin/ccx",
+		Process:        proc,
+		StartupTimeout: 50 * time.Millisecond,
+		LockStaleAfter: time.Millisecond,
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	paths := RuntimePaths(root)
+	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "live-owner", PID: 4242, CreatedAt: old})
+	proc.setAlive(4242, true)
+
+	result, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected live old lock to block start")
+	}
+	if !strings.Contains(err.Error(), "daemon start already in progress") {
+		t.Fatalf("error = %v", err)
+	}
+	if result.Started || proc.startCalls != 0 {
+		t.Fatalf("result = %+v startCalls=%d, want no spawn", result, proc.startCalls)
+	}
+	record := readLockRecordForTest(t, &paths)
+	if record.Token != "live-owner" || record.PID != 4242 {
+		t.Fatalf("lock after blocked start = %+v", record)
 	}
 }
 
@@ -236,6 +282,37 @@ func TestStartDetachedTimeoutDoesNotReportPIDOnlyAsRunning(t *testing.T) {
 	}
 	if result.Status.Running || result.Status.URL != "" {
 		t.Fatalf("pid-only timeout status = %+v", result.Status)
+	}
+}
+
+func TestStartDetachedPartialStartErrorKeepsLockWhileChildAlive(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	proc.nextPID = 9753
+	proc.startErr = errors.New("release failed")
+	proc.keepAliveOnTerminate = true
+	c := Controller{
+		Root:           root,
+		Version:        "test",
+		Executable:     "/bin/ccx",
+		Process:        proc,
+		StartupTimeout: 50 * time.Millisecond,
+		StopTimeout:    50 * time.Millisecond,
+	}
+
+	result, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected partial start error")
+	}
+	if result.Started {
+		t.Fatalf("result = %+v, want not started", result)
+	}
+	if proc.terminateCalls != 1 {
+		t.Fatalf("terminateCalls = %d, want 1", proc.terminateCalls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "daemon.lock")); err != nil {
+		t.Fatalf("expected lock to remain while partial child is live: %v", err)
 	}
 }
 
@@ -307,6 +384,60 @@ func TestStatusWithLiveNonDaemonPIDReportsNotRunning(t *testing.T) {
 	}
 }
 
+func TestStatusWithMatchingProcessButMissingLockReportsNotRunning(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	c := Controller{Root: root, Version: "test", Process: proc}
+	writeStatusFile(t, root, contracts.DaemonStatus{
+		PID:            1360,
+		Version:        "test",
+		Port:           7777,
+		URL:            "http://127.0.0.1:7777",
+		ExecutablePath: "/bin/ccx",
+		StartToken:     "status-token",
+		Running:        true,
+	})
+	writePIDFile(t, root, 1360)
+	proc.setAlive(1360, true)
+
+	status, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Running {
+		t.Fatalf("missing lock status running = true: %+v", status)
+	}
+}
+
+func TestStatusWithMatchingProcessButMismatchedLockReportsNotRunning(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	c := Controller{Root: root, Version: "test", Process: proc}
+	writeStatusFile(t, root, contracts.DaemonStatus{
+		PID:            1361,
+		Version:        "test",
+		Port:           7777,
+		URL:            "http://127.0.0.1:7777",
+		ExecutablePath: "/bin/ccx",
+		StartToken:     "status-token",
+		Running:        true,
+	})
+	writePIDFile(t, root, 1361)
+	paths := RuntimePaths(root)
+	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "other-token", PID: 1361, CreatedAt: time.Now().UTC()})
+	proc.setAlive(1361, true)
+
+	status, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Running {
+		t.Fatalf("mismatched lock status running = true: %+v", status)
+	}
+}
+
 func TestStopWithLiveNonDaemonPIDDoesNotTerminate(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -336,6 +467,37 @@ func TestStopWithLiveNonDaemonPIDDoesNotTerminate(t *testing.T) {
 	}
 }
 
+func TestStopWithMatchingProcessButMismatchedLockDoesNotTerminate(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	c := Controller{Root: root, Version: "test", Process: proc}
+	writeStatusFile(t, root, contracts.DaemonStatus{
+		PID:            2470,
+		Version:        "test",
+		Port:           7777,
+		URL:            "http://127.0.0.1:7777",
+		ExecutablePath: "/bin/ccx",
+		StartToken:     "status-token",
+		Running:        true,
+	})
+	writePIDFile(t, root, 2470)
+	paths := RuntimePaths(root)
+	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "other-token", PID: 2470, CreatedAt: time.Now().UTC()})
+	proc.setAlive(2470, true)
+
+	stopped, err := c.Stop(ctx)
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if stopped.Stopped {
+		t.Fatalf("stop result = %+v, want not stopped", stopped)
+	}
+	if proc.terminateCalls != 0 {
+		t.Fatalf("terminateCalls = %d, want 0", proc.terminateCalls)
+	}
+}
+
 func TestStopNoopsWhenAbsentAndTerminatesRunningDaemon(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -352,12 +514,16 @@ func TestStopNoopsWhenAbsentAndTerminatesRunningDaemon(t *testing.T) {
 
 	writePIDFile(t, root, 2468)
 	writeStatusFile(t, root, contracts.DaemonStatus{
-		PID:     2468,
-		Version: "test",
-		Port:    7777,
-		URL:     "http://127.0.0.1:7777",
-		Running: true,
+		PID:            2468,
+		Version:        "test",
+		Port:           7777,
+		URL:            "http://127.0.0.1:7777",
+		ExecutablePath: "/bin/ccx",
+		StartToken:     "token-2468",
+		Running:        true,
 	})
+	paths := RuntimePaths(root)
+	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "token-2468", PID: 2468, CreatedAt: time.Now().UTC()})
 	proc.setAlive(2468, true)
 
 	stopped, err := c.Stop(ctx)
@@ -478,6 +644,7 @@ type fakeProcessManager struct {
 	nextPID              int
 	startCalls           int
 	terminateCalls       int
+	startErr             error
 	keepAliveOnTerminate bool
 	onStart              func(*StartProcessSpec, int)
 }
@@ -501,13 +668,30 @@ func (f *fakeProcessManager) Matches(pid int, _ string) bool {
 
 func (f *fakeProcessManager) StartDetached(_ context.Context, spec *StartProcessSpec) (int, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.startCalls++
 	pid := f.nextPID
 	f.alive[pid] = true
-	if f.onStart != nil {
-		f.onStart(spec, pid)
+	onStart := f.onStart
+	if f.startErr != nil {
+		err := f.startErr
+		f.mu.Unlock()
+		return pid, err
 	}
+	f.mu.Unlock()
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		paths := RuntimePaths(spec.Root)
+		if err := writeLockRecord(paths.LockPath, daemonLockRecord{
+			Token:     spec.StartToken,
+			PID:       pid,
+			CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			return
+		}
+		if onStart != nil {
+			onStart(spec, pid)
+		}
+	}()
 	return pid, nil
 }
 

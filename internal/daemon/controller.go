@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
@@ -96,6 +97,9 @@ func (c *Controller) Status(_ context.Context) (contracts.DaemonStatus, error) {
 			status.Running = false
 		}
 	}
+	if status.Running && !statusLockMatches(&paths, &status) {
+		status.Running = false
+	}
 	return status, nil
 }
 
@@ -120,12 +124,13 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 	if status.Running {
 		return StartResult{Status: status, AlreadyRunning: true}, nil
 	}
+	c.removeAbandonedStatusRuntime(&paths, &status)
 
 	token, err := newLockToken()
 	if err != nil {
 		return StartResult{}, err
 	}
-	lock, err := acquireDaemonLock(&paths, c.lockStaleAfter(), token)
+	lock, err := acquireDaemonLock(&paths, c.lockStaleAfter(), token, c.process().Alive)
 	if err != nil {
 		status, statusErr := c.Status(ctx)
 		if statusErr != nil {
@@ -173,16 +178,31 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 		StartToken: token,
 		Executable: exe,
 		Args:       args,
-		Env:        append(os.Environ(), envLockHeldByParent+"=1", envLockToken+"="+token),
+		Env:        append(os.Environ(), envLockHeldByParent+"=1", envLockToken+"="+token, envLockParentPID+"="+strconv.Itoa(os.Getpid())),
 		LogPath:    paths.LogPath,
 	}
 	pid, err := c.process().StartDetached(ctx, spec)
 	if err != nil {
+		if pid > 0 {
+			_ = lock.setChildPID(pid)
+			_ = c.process().Terminate(pid)
+			if !c.waitForProcessDeath(ctx, pid) {
+				lock.disown()
+				releaseLock = false
+			}
+		}
 		return StartResult{}, fmt.Errorf("start detached daemon: %w", err)
+	}
+	if err := lock.setChildPID(pid); err != nil {
+		_ = c.process().Terminate(pid)
+		return StartResult{}, err
 	}
 
 	status, err = c.waitForReadyStatus(ctx, pid)
 	if err != nil {
+		if status.PID == 0 {
+			status.PID = pid
+		}
 		_ = c.process().Terminate(pid)
 		if !c.waitForProcessDeath(ctx, pid) {
 			lock.disown()
@@ -214,7 +234,7 @@ func (c *Controller) Stop(ctx context.Context) (StopResult, error) {
 				return StopResult{}, err
 			}
 			removePIDIf(&paths, status.PID)
-			removeLock(&paths, status.StartToken)
+			removeLockIfOwner(&paths, status.StartToken, status.PID)
 		}
 		return StopResult{Status: status}, nil
 	}
@@ -231,7 +251,7 @@ func (c *Controller) Stop(ctx context.Context) (StopResult, error) {
 				return StopResult{}, err
 			}
 			removePIDIf(&paths, status.PID)
-			removeLock(&paths, status.StartToken)
+			removeLockIfOwner(&paths, status.StartToken, status.PID)
 			return StopResult{Status: status, Stopped: true}, nil
 		}
 		select {
@@ -295,6 +315,25 @@ func (c *Controller) waitForProcessDeath(ctx context.Context, pid int) bool {
 		}
 	}
 	return !c.process().Alive(pid)
+}
+
+func statusLockMatches(paths *Paths, status *contracts.DaemonStatus) bool {
+	if status.StartToken == "" || status.PID <= 0 {
+		return false
+	}
+	record, _, err := readLockRecord(paths.LockPath)
+	if err != nil {
+		return false
+	}
+	return record.Token == status.StartToken && record.PID == status.PID
+}
+
+func (c *Controller) removeAbandonedStatusRuntime(paths *Paths, status *contracts.DaemonStatus) {
+	if status.PID <= 0 || c.process().Alive(status.PID) {
+		return
+	}
+	removePIDIf(paths, status.PID)
+	removeLockIfOwner(paths, status.StartToken, status.PID)
 }
 
 func (c *Controller) root() (string, error) {
