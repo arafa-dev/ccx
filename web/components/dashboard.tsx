@@ -32,6 +32,7 @@ export function Dashboard() {
   const [daemonStatus, setDaemonStatus] = useState<DaemonStatus | null>(null);
   const [headroom, setHeadroom] = useState<HeadroomResponse | null>(null);
   const [hookStatuses, setHookStatuses] = useState<HookStatus[]>([]);
+  const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [live, setLive] = useState<LiveStatus>('connecting');
   const [refreshedAt, setRefreshedAt] = useState<Date>(new Date());
@@ -52,6 +53,7 @@ export function Dashboard() {
         getHooksStatus(),
       ]);
       setProfiles(p);
+      setProfilesLoaded(true);
       setUsageRows(u.rows);
       setDaemonStatus(d);
       setHeadroom(h);
@@ -113,7 +115,9 @@ export function Dashboard() {
           </div>
         )}
 
-        {profiles.length === 0 && !loadError ? (
+        {!profilesLoaded && !loadError ? (
+          <InitialLoading />
+        ) : profilesLoaded && profiles.length === 0 && !loadError ? (
           <OnboardingEmpty />
         ) : (
           <>
@@ -137,6 +141,18 @@ export function Dashboard() {
 
       <Footer lastRefreshed={refreshedAt} />
     </div>
+  );
+}
+
+function InitialLoading() {
+  return (
+    <section
+      role="status"
+      aria-label="Loading dashboard"
+      className="rounded-xl border border-card-border bg-card p-6 text-sm text-muted"
+    >
+      Loading dashboard...
+    </section>
   );
 }
 

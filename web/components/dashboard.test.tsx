@@ -156,6 +156,29 @@ vi.mock('@/lib/api', async () => {
 describe('<Dashboard>', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it('shows loading state during the initial dashboard load instead of onboarding empty', async () => {
+    let resolveProfiles: (value: ProfileWithTotals[]) => void = () => {};
+    vi.mocked(getProfiles).mockImplementationOnce(
+      () =>
+        new Promise<ProfileWithTotals[]>((resolve) => {
+          resolveProfiles = resolve;
+        }),
+    );
+
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByRole('status', { name: /loading dashboard/i })).toBeInTheDocument();
+    expect(screen.queryByText(/no profiles yet/i)).not.toBeInTheDocument();
+
+    resolveProfiles([]);
+
+    expect(await screen.findByText(/no profiles yet/i)).toBeInTheDocument();
+  });
+
   it('loads profiles and renders cards', async () => {
     render(
       <ThemeProvider>

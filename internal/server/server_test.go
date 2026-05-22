@@ -195,7 +195,23 @@ func (m *mockStore) QueryUsage(_ context.Context, q contracts.UsageQuery) ([]con
 
 func (m *mockStore) QuerySessions(_ context.Context, q contracts.SessionQuery) ([]contracts.SessionTelemetry, error) {
 	m.lastSessionQuery = q
-	return append([]contracts.SessionTelemetry(nil), m.sessions...), nil
+	out := make([]contracts.SessionTelemetry, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		if q.Profile != "" && session.Profile != q.Profile {
+			continue
+		}
+		if q.Status != "" && session.Status != q.Status {
+			continue
+		}
+		if !q.Since.IsZero() && session.LastSeenAt.Before(q.Since) {
+			continue
+		}
+		out = append(out, session)
+	}
+	if q.Limit > 0 && len(out) > q.Limit {
+		out = out[:q.Limit]
+	}
+	return out, nil
 }
 
 func (m *mockStore) QueryRecentFailures(context.Context, string, time.Time) ([]contracts.HookEvent, error) {

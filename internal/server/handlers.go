@@ -156,21 +156,24 @@ func hooksStatusOptions(r *http.Request) hooks.StatusOptions {
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	dur, err := parseSinceParam(q.Get("since"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	var since time.Time
+	if rawSince := q.Get("since"); rawSince != "" {
+		dur, err := parseSinceParam(rawSince)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		since = time.Now().UTC().Add(-dur)
 	}
 	limit, err := parseLimitParam(q.Get("limit"), 50)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	now := time.Now().UTC()
 	rows, err := s.deps.Store.QuerySessions(r.Context(), contracts.SessionQuery{
 		Profile: q.Get("profile"),
 		Status:  q.Get("status"),
-		Since:   now.Add(-dur),
+		Since:   since,
 		Limit:   limit,
 	})
 	if err != nil {

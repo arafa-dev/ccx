@@ -192,6 +192,57 @@ func TestSessionsEndpointFiltersAndSortsNewestFirst(t *testing.T) {
 	}
 }
 
+func TestSessionsEndpointDoesNotApplySinceFilterUnlessProvided(t *testing.T) {
+	now := time.Now().UTC()
+	store := &mockStore{
+		sessions: []contracts.SessionTelemetry{
+			{Profile: "work", Session: "old", Status: "completed", LastSeenAt: now.Add(-48 * time.Hour)},
+			{Profile: "work", Session: "new", Status: "completed", LastSeenAt: now.Add(-2 * time.Hour)},
+		},
+	}
+	srv := server.New(server.Deps{Store: store, Pricing: &mockPricing{}}, "test")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	res, err := ts.Client().Get(ts.URL + "/api/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusOK)
+	}
+	if !store.lastSessionQuery.Since.IsZero() {
+		t.Fatalf("query since = %s, want zero time when since is omitted", store.lastSessionQuery.Since)
+	}
+	var unfiltered []contracts.SessionTelemetry
+	if err := json.NewDecoder(res.Body).Decode(&unfiltered); err != nil {
+		t.Fatalf("decode unfiltered response: %v", err)
+	}
+	if got := sessionNames(unfiltered); !slices.Equal(got, []string{"new", "old"}) {
+		t.Fatalf("unfiltered sessions = %+v, want new and old", got)
+	}
+
+	res, err = ts.Client().Get(ts.URL + "/api/sessions?since=24h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status with since = %d, want %d", res.StatusCode, http.StatusOK)
+	}
+	if store.lastSessionQuery.Since.IsZero() {
+		t.Fatalf("query since is zero, want parsed since when provided")
+	}
+	var filtered []contracts.SessionTelemetry
+	if err := json.NewDecoder(res.Body).Decode(&filtered); err != nil {
+		t.Fatalf("decode filtered response: %v", err)
+	}
+	if got := sessionNames(filtered); !slices.Equal(got, []string{"new"}) {
+		t.Fatalf("filtered sessions = %+v, want only new", got)
+	}
+}
+
 func TestHeadroomEndpointReturnsRecommendationAndUnavailableCandidates(t *testing.T) {
 	goodDir := t.TempDir()
 	profiles := mockProfiles{profiles: []contracts.Profile{
@@ -236,6 +287,14 @@ func TestHeadroomEndpointReturnsRecommendationAndUnavailableCandidates(t *testin
 	if badIdx < 0 || body.Candidates[badIdx].Available {
 		t.Fatalf("bad candidate = %+v, want present and unavailable", body.Candidates)
 	}
+}
+
+func sessionNames(sessions []contracts.SessionTelemetry) []string {
+	names := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		names = append(names, session.Session)
+	}
+	return names
 }
 
 type fakeDaemonStatusProvider struct {
