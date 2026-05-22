@@ -49,6 +49,10 @@ ccx usage
 
 # 5. Open the dashboard
 ccx dashboard
+
+# 6. Keep usage fresh in the background
+ccx daemon start
+ccx daemon status
 ```
 
 ![dashboard screenshot](docs/assets/dashboard.png)
@@ -68,11 +72,56 @@ binary.
 
 ccx never proxies API calls. The upstream `claude` CLI does what it always did —
 ccx just chooses *which* config dir and *which* keychain entry `claude` reads
-from, by exporting `CLAUDE_CONFIG_DIR` in your shell.
+from, by exporting `CLAUDE_CONFIG_DIR` in your shell. The optional daemon,
+hooks, and suggestions all work from local files and the local SQLite cache.
 
 ![architecture diagram](docs/assets/architecture.png)
 
 For details, see [`docs/architecture.md`](docs/architecture.md).
+
+## Common usage
+
+Background daemon:
+
+```bash
+ccx daemon start              # run local scanner/dashboard API in the background
+ccx daemon status             # show pid and URL; add --json for paths
+ccx daemon logs --follow      # stream ~/.ccx/daemon.log
+ccx daemon restart            # stop and start the daemon
+ccx daemon stop
+```
+
+Hook telemetry:
+
+```bash
+ccx hooks install             # install ccx-managed hooks for all profiles
+ccx hooks install --profile work
+ccx hooks status
+ccx hooks uninstall --profile work
+```
+
+Hooks update each profile's `settings.json`, create
+`settings.json.ccx-backup-*` files before modifying existing settings, and
+record local session telemetry such as starts, stops, failures, and compactions.
+
+Advisory profile suggestions:
+
+```bash
+ccx profile set work \
+  --daily-tokens 200000 \
+  --weekly-tokens 1000000 \
+  --monthly-usd 100 \
+  --priority 5 \
+  --rate-limit-cooldown 5h \
+  --suggestions enabled
+
+ccx suggest
+ccx suggest --json
+```
+
+`ccx suggest` ranks registered profiles by configured budgets, recent usage,
+hook failures, cooldowns, and priority. It prints a suggested `ccx use <name>`
+command; it does not switch accounts automatically.
 
 ## Comparison
 
@@ -108,10 +157,10 @@ See [`docs/installation.md`](docs/installation.md) for per-platform setup detail
 
 Planned, not promised:
 
-- **v0.2** — Long-running daemon (`ccx daemon start`) so the dashboard updates without a foreground process
-- **v0.3** — Claude Code hooks integration for per-session telemetry (durations, exit codes)
-- **v0.4** — Advisory routing: `ccx suggest` recommends which profile has headroom (never proxies)
-- **v0.5+** — Team workspace primitives, profile sync via git
+- Dashboard refinements on top of the background daemon
+- Richer hook-based session analytics
+- More transparent headroom scoring and suggestion explanations
+- Team workspace primitives, profile sync via git
 
 ## Contributing
 
