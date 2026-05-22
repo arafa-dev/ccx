@@ -189,7 +189,7 @@ ORDER BY last_seen_at DESC
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []contracts.SessionTelemetry
+	out := make([]contracts.SessionTelemetry, 0)
 	for rows.Next() {
 		session, err := scanSessionTelemetry(rows)
 		if err != nil {

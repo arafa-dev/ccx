@@ -180,6 +180,9 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if rows == nil {
+		rows = []contracts.SessionTelemetry{}
+	}
 	slices.SortFunc(rows, func(a, b contracts.SessionTelemetry) int {
 		return b.LastSeenAt.Compare(a.LastSeenAt)
 	})

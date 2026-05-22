@@ -178,6 +178,7 @@ type mockStore struct {
 	queryRows        []contracts.UsageRow
 	queryErr         error
 	sessions         []contracts.SessionTelemetry
+	nilSessions      bool
 	lastSessionQuery contracts.SessionQuery
 	usageByProfile   map[string][]contracts.UsageRow
 }
@@ -195,6 +196,9 @@ func (m *mockStore) QueryUsage(_ context.Context, q contracts.UsageQuery) ([]con
 
 func (m *mockStore) QuerySessions(_ context.Context, q contracts.SessionQuery) ([]contracts.SessionTelemetry, error) {
 	m.lastSessionQuery = q
+	if m.nilSessions {
+		return nil, nil
+	}
 	out := make([]contracts.SessionTelemetry, 0, len(m.sessions))
 	for _, session := range m.sessions {
 		if q.Profile != "" && session.Profile != q.Profile {

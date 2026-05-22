@@ -127,6 +127,23 @@ func TestUpsertSessionTelemetryLifecycle(t *testing.T) {
 	}
 }
 
+func TestQuerySessionsReturnsEmptySliceWhenNoRows(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	got, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if got == nil {
+		t.Fatal("QuerySessions returned nil slice, want empty slice")
+	}
+	if len(got) != 0 {
+		t.Fatalf("sessions length = %d, want 0", len(got))
+	}
+}
+
 func TestUpsertSessionTelemetryStopCompletesSession(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

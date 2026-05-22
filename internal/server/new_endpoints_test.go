@@ -243,6 +243,33 @@ func TestSessionsEndpointDoesNotApplySinceFilterUnlessProvided(t *testing.T) {
 	}
 }
 
+func TestSessionsEndpointReturnsEmptyArrayWhenStoreHasNoRows(t *testing.T) {
+	store := &mockStore{nilSessions: true}
+	srv := server.New(server.Deps{Store: store, Pricing: &mockPricing{}}, "test")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	res, err := ts.Client().Get(ts.URL + "/api/sessions?since=7d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusOK)
+	}
+
+	var body []contracts.SessionTelemetry
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body == nil {
+		t.Fatal("sessions response decoded to nil slice, want empty array")
+	}
+	if len(body) != 0 {
+		t.Fatalf("sessions length = %d, want 0", len(body))
+	}
+}
+
 func TestHeadroomEndpointReturnsRecommendationAndUnavailableCandidates(t *testing.T) {
 	goodDir := t.TempDir()
 	profiles := mockProfiles{profiles: []contracts.Profile{
