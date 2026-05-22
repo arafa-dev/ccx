@@ -316,6 +316,51 @@ func TestStartDetachedPartialStartErrorKeepsLockWhileChildAlive(t *testing.T) {
 	}
 }
 
+func TestStartDetachedSetChildPIDFailureKeepsLockWhileChildAlive(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	proc.nextPID = 8642
+	proc.keepAliveOnTerminate = true
+	proc.skipAsyncLockAdopt = true
+	restore := setSetChildPIDErrorHookForTest(errors.New("claim failed"))
+	defer restore()
+	c := Controller{
+		Root:           root,
+		Version:        "test",
+		Executable:     "/bin/ccx",
+		Process:        proc,
+		StartupTimeout: 50 * time.Millisecond,
+		StopTimeout:    50 * time.Millisecond,
+	}
+
+	first, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected setChildPID failure")
+	}
+	if first.Started {
+		t.Fatalf("first result = %+v, want not started", first)
+	}
+	if proc.terminateCalls != 1 {
+		t.Fatalf("terminateCalls = %d, want 1", proc.terminateCalls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "daemon.lock")); err != nil {
+		t.Fatalf("expected lock to remain while child is live: %v", err)
+	}
+
+	proc.nextPID = 9754
+	second, err := c.StartDetached(ctx, StartOptions{Port: 7778, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected preserved lock to block second start")
+	}
+	if !strings.Contains(err.Error(), "daemon start already in progress") {
+		t.Fatalf("second error = %v", err)
+	}
+	if second.Started || proc.startCalls != 1 {
+		t.Fatalf("second result = %+v startCalls=%d, want no second spawn", second, proc.startCalls)
+	}
+}
+
 func TestStartDetachedTimeoutWithLiveChildPreservesLock(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -646,6 +691,7 @@ type fakeProcessManager struct {
 	terminateCalls       int
 	startErr             error
 	keepAliveOnTerminate bool
+	skipAsyncLockAdopt   bool
 	onStart              func(*StartProcessSpec, int)
 }
 
@@ -677,16 +723,19 @@ func (f *fakeProcessManager) StartDetached(_ context.Context, spec *StartProcess
 		f.mu.Unlock()
 		return pid, err
 	}
+	skipAsyncLockAdopt := f.skipAsyncLockAdopt
 	f.mu.Unlock()
 	go func() {
 		time.Sleep(5 * time.Millisecond)
-		paths := RuntimePaths(spec.Root)
-		if err := writeLockRecord(paths.LockPath, daemonLockRecord{
-			Token:     spec.StartToken,
-			PID:       pid,
-			CreatedAt: time.Now().UTC(),
-		}); err != nil {
-			return
+		if !skipAsyncLockAdopt {
+			paths := RuntimePaths(spec.Root)
+			if err := writeLockRecord(paths.LockPath, daemonLockRecord{
+				Token:     spec.StartToken,
+				PID:       pid,
+				CreatedAt: time.Now().UTC(),
+			}); err != nil {
+				return
+			}
 		}
 		if onStart != nil {
 			onStart(spec, pid)

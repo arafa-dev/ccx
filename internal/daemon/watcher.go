@@ -22,7 +22,7 @@ type profileWatcher struct {
 	pollInterval time.Duration
 
 	mu           sync.Mutex
-	scanMu       sync.Mutex
+	scanner      *scanWorker
 	profiles     map[string]contracts.Profile
 	projectsDirs map[string]string
 	watched      map[string]struct{}
@@ -49,9 +49,11 @@ func runProfileWatcher(ctx context.Context, deps *runtimeDeps, logger *log.Logge
 		timers:       map[string]*time.Timer{},
 	}
 	w.refreshProfiles(ctx)
+	w.scanner = newScanWorker(ctx, w.scanAll, w.scanProfile)
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
+	defer w.scanner.stop()
 	defer w.stopTimers()
 
 	for {
@@ -62,7 +64,7 @@ func runProfileWatcher(ctx context.Context, deps *runtimeDeps, logger *log.Logge
 			if !ok {
 				return
 			}
-			w.handleEvent(ctx, event)
+			w.handleEvent(event)
 		case err, ok := <-fsWatcher.Errors:
 			if !ok {
 				return
@@ -70,7 +72,7 @@ func runProfileWatcher(ctx context.Context, deps *runtimeDeps, logger *log.Logge
 			logger.Printf("watcher error: %v", err)
 		case <-ticker.C:
 			w.refreshProfiles(ctx)
-			go w.scanAll(ctx)
+			w.scanner.requestAll()
 		}
 	}
 }
@@ -145,7 +147,7 @@ func (w *profileWatcher) addWatch(path string) error {
 	return nil
 }
 
-func (w *profileWatcher) handleEvent(ctx context.Context, event fsnotify.Event) {
+func (w *profileWatcher) handleEvent(event fsnotify.Event) {
 	if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) == 0 {
 		return
 	}
@@ -156,7 +158,7 @@ func (w *profileWatcher) handleEvent(ctx context.Context, event fsnotify.Event) 
 	if profileName == "" {
 		return
 	}
-	w.schedule(ctx, profileName)
+	w.schedule(profileName)
 }
 
 func (w *profileWatcher) profileForPath(path string) string {
@@ -171,7 +173,7 @@ func (w *profileWatcher) profileForPath(path string) string {
 	return ""
 }
 
-func (w *profileWatcher) schedule(ctx context.Context, profileName string) {
+func (w *profileWatcher) schedule(profileName string) {
 	w.mu.Lock()
 	if timer, ok := w.timers[profileName]; ok {
 		timer.Reset(debounceInterval)
@@ -182,14 +184,12 @@ func (w *profileWatcher) schedule(ctx context.Context, profileName string) {
 		w.mu.Lock()
 		delete(w.timers, profileName)
 		w.mu.Unlock()
-		w.scanProfile(ctx, profileName)
+		w.scanner.requestProfile(profileName)
 	})
 	w.mu.Unlock()
 }
 
 func (w *profileWatcher) scanAll(ctx context.Context) {
-	w.scanMu.Lock()
-	defer w.scanMu.Unlock()
 	if _, err := ingestAllProfiles(ctx, w.deps); err != nil {
 		w.logger.Printf("poll ingest failed: %v", err)
 	}
@@ -208,8 +208,6 @@ func (w *profileWatcher) scanProfile(ctx context.Context, profileName string) {
 			return
 		}
 	}
-	w.scanMu.Lock()
-	defer w.scanMu.Unlock()
 	if err := ingestProfile(ctx, w.deps, p); err != nil {
 		w.logger.Printf("watch ingest profile=%s failed: %v", profileName, err)
 	}
@@ -222,4 +220,110 @@ func (w *profileWatcher) stopTimers() {
 		timer.Stop()
 	}
 	w.timers = map[string]*time.Timer{}
+}
+
+type scanWorker struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
+	scanAll     func(context.Context)
+	scanProfile func(context.Context, string)
+	wake        chan struct{}
+	done        chan struct{}
+
+	mu      sync.Mutex
+	pending scanRequest
+}
+
+type scanRequest struct {
+	all      bool
+	profiles map[string]struct{}
+}
+
+func newScanWorker(ctx context.Context, scanAll func(context.Context), scanProfile func(context.Context, string)) *scanWorker {
+	workerCtx, cancel := context.WithCancel(ctx)
+	w := &scanWorker{
+		ctx:         workerCtx,
+		cancel:      cancel,
+		scanAll:     scanAll,
+		scanProfile: scanProfile,
+		wake:        make(chan struct{}, 1),
+		done:        make(chan struct{}),
+	}
+	go w.run()
+	return w
+}
+
+func (w *scanWorker) requestAll() {
+	w.mu.Lock()
+	w.pending.all = true
+	w.pending.profiles = nil
+	w.mu.Unlock()
+	w.signal()
+}
+
+func (w *scanWorker) requestProfile(profileName string) {
+	if profileName == "" {
+		return
+	}
+	w.mu.Lock()
+	if !w.pending.all {
+		if w.pending.profiles == nil {
+			w.pending.profiles = map[string]struct{}{}
+		}
+		w.pending.profiles[profileName] = struct{}{}
+	}
+	w.mu.Unlock()
+	w.signal()
+}
+
+func (w *scanWorker) stop() {
+	w.cancel()
+	<-w.done
+}
+
+func (w *scanWorker) run() {
+	defer close(w.done)
+	for {
+		req, ok := w.nextRequest()
+		if !ok {
+			return
+		}
+		if req.all {
+			w.scanAll(w.ctx)
+			continue
+		}
+		for profileName := range req.profiles {
+			w.scanProfile(w.ctx, profileName)
+		}
+	}
+}
+
+func (w *scanWorker) nextRequest() (scanRequest, bool) {
+	for {
+		select {
+		case <-w.ctx.Done():
+			return scanRequest{}, false
+		default:
+		}
+		w.mu.Lock()
+		if w.pending.all || len(w.pending.profiles) > 0 {
+			req := w.pending
+			w.pending = scanRequest{}
+			w.mu.Unlock()
+			return req, true
+		}
+		w.mu.Unlock()
+		select {
+		case <-w.ctx.Done():
+			return scanRequest{}, false
+		case <-w.wake:
+		}
+	}
+}
+
+func (w *scanWorker) signal() {
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
 }

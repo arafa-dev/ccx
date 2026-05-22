@@ -141,9 +141,16 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if poll <= 0 {
 		poll = defaultPollInterval
 	}
-	go runProfileWatcher(runCtx, deps, logger, poll)
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		runProfileWatcher(runCtx, deps, logger, poll)
+	}()
 
-	if err := runServer(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	err = runServer()
+	stopSignals()
+	<-watcherDone
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil

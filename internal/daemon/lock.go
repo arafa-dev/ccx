@@ -42,6 +42,7 @@ type daemonLock struct {
 var (
 	beforeObservedLockRemoveHook func()
 	beforeLockAdoptWriteHook     func()
+	setChildPIDErrorHook         func() error
 )
 
 func setBeforeObservedLockRemoveHookForTest(hook func()) func() {
@@ -57,6 +58,16 @@ func setBeforeLockAdoptWriteHookForTest(hook func()) func() {
 	beforeLockAdoptWriteHook = hook
 	return func() {
 		beforeLockAdoptWriteHook = old
+	}
+}
+
+func setSetChildPIDErrorHookForTest(err error) func() {
+	old := setChildPIDErrorHook
+	setChildPIDErrorHook = func() error {
+		return err
+	}
+	return func() {
+		setChildPIDErrorHook = old
 	}
 }
 
@@ -282,6 +293,9 @@ func (l *daemonLock) release() {
 func (l *daemonLock) setChildPID(childPID int) error {
 	if l == nil || !l.owned {
 		return nil
+	}
+	if setChildPIDErrorHook != nil {
+		return setChildPIDErrorHook()
 	}
 	record, observed, err := readLockRecord(l.path)
 	if err != nil {
