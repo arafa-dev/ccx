@@ -21,6 +21,7 @@ const (
 // Store is the subset of storage needed to evaluate profile headroom.
 type Store interface {
 	QueryUsage(ctx context.Context, q contracts.UsageQuery) ([]contracts.UsageRow, error)
+	QuerySessions(ctx context.Context, q contracts.SessionQuery) ([]contracts.SessionTelemetry, error)
 	QueryRecentFailures(ctx context.Context, profileName string, since time.Time) ([]contracts.HookEvent, error)
 	GetProfileHealth(ctx context.Context, profileName string) (contracts.ProfileHealth, error)
 }
@@ -143,7 +144,11 @@ func (e Evaluator) evaluateProfile(ctx context.Context, p *contracts.Profile, no
 	if err != nil {
 		return Candidate{}, fmt.Errorf("querying recent failures for %q: %w", p.Name, err)
 	}
-	failurePenalty := e.applyFailureGates(&c, p, failures, health, haveHealth, now)
+	sessions, err := e.recentSessions(ctx, p.Name, now)
+	if err != nil {
+		return Candidate{}, err
+	}
+	failurePenalty := e.applyFailureGates(&c, p, failures, sessions, health, haveHealth, now, opts.IncludeUnavailable)
 
 	c.HeadroomPercent = headroomPercent(p.Limits, usage)
 	if hasBudget(p.Limits) {
@@ -259,13 +264,27 @@ func (e Evaluator) usdInWindow(ctx context.Context, profile string, start, end t
 	return total, nil
 }
 
+func (e Evaluator) recentSessions(ctx context.Context, profile string, now time.Time) ([]contracts.SessionTelemetry, error) {
+	sessions, err := e.Store.QuerySessions(ctx, contracts.SessionQuery{
+		Profile: profile,
+		Since:   now.Add(-failureLookback),
+		Limit:   200,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("querying sessions for %q: %w", profile, err)
+	}
+	return sessions, nil
+}
+
 func (e Evaluator) applyFailureGates(
 	c *Candidate,
 	p *contracts.Profile,
 	failures []contracts.HookEvent,
+	sessions []contracts.SessionTelemetry,
 	health contracts.ProfileHealth,
 	haveHealth bool,
 	now time.Time,
+	includeUnavailable bool,
 ) float64 {
 	var penalty float64
 	for i := range failures {
@@ -284,10 +303,15 @@ func (e Evaluator) applyFailureGates(
 				penalty = max(penalty, 10)
 			}
 		case "authentication_failed", "oauth_org_not_allowed":
-			resolved := haveHealth && health.AuthStatus == "ok" && health.CheckedAt.After(failure.Timestamp)
+			resolved := authFailureResolved(failure, sessions, health, haveHealth)
 			if !resolved {
-				c.Available = false
-				c.Reasons = append(c.Reasons, failure.Error+" unresolved")
+				if includeUnavailable {
+					c.Reasons = append(c.Reasons, failure.Error+" unresolved included by --include-unavailable")
+					penalty = max(penalty, 25)
+				} else {
+					c.Available = false
+					c.Reasons = append(c.Reasons, failure.Error+" unresolved")
+				}
 			} else {
 				penalty = max(penalty, 10)
 			}
@@ -296,6 +320,44 @@ func (e Evaluator) applyFailureGates(
 		}
 	}
 	return penalty
+}
+
+func authFailureResolved(
+	failure *contracts.HookEvent,
+	sessions []contracts.SessionTelemetry,
+	health contracts.ProfileHealth,
+	haveHealth bool,
+) bool {
+	if failure == nil {
+		return false
+	}
+	if haveHealth && health.AuthStatus == "ok" && health.CheckedAt.After(failure.Timestamp) {
+		return true
+	}
+	for i := range sessions {
+		if sessionResolvesAuthFailure(&sessions[i], failure.Timestamp) {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionResolvesAuthFailure(session *contracts.SessionTelemetry, failureAt time.Time) bool {
+	if session == nil || isAuthFailure(session.FailureError) {
+		return false
+	}
+	switch session.Status {
+	case "completed":
+		return session.EndedAt.After(failureAt) || session.LastSeenAt.After(failureAt)
+	case "running":
+		return session.StartedAt.After(failureAt) || session.LastSeenAt.After(failureAt)
+	default:
+		return false
+	}
+}
+
+func isAuthFailure(errorCode string) bool {
+	return errorCode == "authentication_failed" || errorCode == "oauth_org_not_allowed"
 }
 
 func rateLimitCooldown(limits contracts.ProfileLimits) time.Duration {

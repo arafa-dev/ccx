@@ -43,6 +43,29 @@ func processMatchesOS(pid int, expectedExecutable string) bool {
 	return got != "" && (sameExecutablePath(got, expectedExecutable) || filepath.Base(got) == filepath.Base(expectedExecutable))
 }
 
+func processIdentityOS(pid int) (string, bool) {
+	if zombie, ok := processZombieOS(pid); ok && zombie {
+		return "", false
+	}
+	if runtime.GOOS == "linux" {
+		data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat") //nolint:gosec // pid is an int.
+		if err == nil {
+			if startTime := linuxProcStatStartTime(string(data)); startTime != "" {
+				return "linux:" + linuxBootID() + ":" + startTime, true
+			}
+		}
+	}
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "lstart=").Output() //nolint:gosec // Command is constant and pid is an int.
+	if err != nil {
+		return "", false
+	}
+	started := strings.Join(strings.Fields(string(out)), " ")
+	if started == "" {
+		return "", false
+	}
+	return runtime.GOOS + ":" + started, true
+}
+
 func processZombieOS(pid int) (isZombie, known bool) {
 	if runtime.GOOS == "linux" {
 		data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat") //nolint:gosec // pid is an int.
@@ -77,6 +100,27 @@ func linuxProcStatState(stat string) string {
 		return ""
 	}
 	return fields[0]
+}
+
+func linuxProcStatStartTime(stat string) string {
+	endCommand := strings.LastIndex(stat, ")")
+	if endCommand < 0 || endCommand+2 >= len(stat) {
+		return ""
+	}
+	rest := strings.TrimSpace(stat[endCommand+1:])
+	fields := strings.Fields(rest)
+	if len(fields) <= 19 {
+		return ""
+	}
+	return fields[19]
+}
+
+func linuxBootID() string {
+	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id") //nolint:gosec // constant OS path.
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func sameExecutablePath(a, b string) bool {

@@ -41,6 +41,7 @@ type DaemonStatus struct {
 	LogPath         string    `json:"log_path"`
 	ExecutablePath  string    `json:"executable_path,omitempty"`
 	StartToken      string    `json:"start_token,omitempty"`
+	ProcessIdentity string    `json:"process_identity,omitempty"`
 	ProfilesWatched int       `json:"profiles_watched"`
 	Running         bool      `json:"running"`
 }

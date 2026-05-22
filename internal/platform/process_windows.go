@@ -49,6 +49,26 @@ func processMatchesOS(pid int, expectedExecutable string) bool {
 	return false
 }
 
+func processIdentityOS(pid int) (string, bool) {
+	cmd := exec.Command("wmic", "process", "where", "processid="+strconv.Itoa(pid), "get", "CreationDate", "/value") //nolint:gosec // Command is constant and pid is an int.
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "CreationDate=") {
+			continue
+		}
+		created := strings.TrimPrefix(line, "CreationDate=")
+		if created == "" {
+			return "", false
+		}
+		return "windows:" + created, true
+	}
+	return "", false
+}
+
 func terminateProcessOS(pid int) error {
 	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid)) //nolint:gosec // command is constant and pid is an int.
 	if err := cmd.Run(); err != nil && processAliveOS(pid) {

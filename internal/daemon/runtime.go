@@ -47,11 +47,15 @@ func Run(ctx context.Context, opts RunOptions) error {
 		return fmt.Errorf("create daemon root: %w", err)
 	}
 	var lock *daemonLock
+	processIdentity, ok := platform.ProcessIdentity(os.Getpid())
+	if !ok {
+		return fmt.Errorf("determine daemon process identity")
+	}
 	if os.Getenv(envLockHeldByParent) == "1" {
 		parentPID, _ := strconv.Atoi(os.Getenv(envLockParentPID))
-		lock, err = adoptDaemonLockWithRetry(ctx, &paths, os.Getenv(envLockToken), parentPID, os.Getpid(), defaultStartupWait)
+		lock, err = adoptDaemonLockWithRetry(ctx, &paths, os.Getenv(envLockToken), parentPID, os.Getpid(), processIdentity, defaultStartupWait)
 	} else {
-		lock, err = acquireDaemonLock(&paths, defaultLockStaleAfter, "", platform.ProcessAlive)
+		lock, err = acquireDaemonLock(&paths, defaultLockStaleAfter, "", processIdentity, platformLockOwnerAlive)
 	}
 	if err != nil {
 		return err
@@ -133,6 +137,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 		LogPath:         paths.LogPath,
 		ExecutablePath:  exe,
 		StartToken:      lock.token,
+		ProcessIdentity: processIdentity,
 		ProfilesWatched: len(profiles),
 		Running:         true,
 	}
@@ -167,6 +172,24 @@ func Run(ctx context.Context, opts RunOptions) error {
 type currentStatusProvider struct {
 	mu     sync.RWMutex
 	status contracts.DaemonStatus
+}
+
+func platformLockOwnerAlive(record *daemonLockRecord) bool {
+	if record == nil {
+		return false
+	}
+	if record.PID > 0 && platformProcessOwns(record.PID, record.ProcessIdentity) {
+		return true
+	}
+	return record.ChildPID > 0 && platformProcessOwns(record.ChildPID, record.ChildProcessIdentity)
+}
+
+func platformProcessOwns(pid int, identity string) bool {
+	if identity == "" || !platform.ProcessAlive(pid) {
+		return false
+	}
+	got, ok := platform.ProcessIdentity(pid)
+	return ok && got == identity
 }
 
 func (p *currentStatusProvider) Set(status *contracts.DaemonStatus) {

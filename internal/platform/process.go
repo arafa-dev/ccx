@@ -56,6 +56,16 @@ func ProcessMatches(pid int, expectedExecutable string) bool {
 	return processMatchesOS(pid, expectedExecutable)
 }
 
+// ProcessIdentity returns a stable identity for the currently running process
+// occupying pid. The value is suitable only for equality checks within the same
+// machine boot and should not be shown to users.
+func ProcessIdentity(pid int) (string, bool) {
+	if pid <= 0 {
+		return "", false
+	}
+	return processIdentityOS(pid)
+}
+
 // TerminateProcess asks pid to exit gracefully where the platform supports it.
 func TerminateProcess(pid int) error {
 	if pid <= 0 {

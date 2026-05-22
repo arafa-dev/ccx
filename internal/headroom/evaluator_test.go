@@ -181,6 +181,56 @@ func TestAuthenticationFailuresExcludeProfile(t *testing.T) {
 	}
 }
 
+func TestAuthenticationFailureIsResolvedByLaterSuccessfulSession(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	store.addWorkFailure(contracts.HookEvent{
+		Event:     "StopFailure",
+		Timestamp: now.Add(-2 * time.Hour),
+		Error:     "authentication_failed",
+	})
+	store.addWorkSession(contracts.SessionTelemetry{
+		Profile:    "work",
+		Session:    "recovered",
+		StartedAt:  now.Add(-time.Hour),
+		EndedAt:    now.Add(-50 * time.Minute),
+		LastSeenAt: now.Add(-50 * time.Minute),
+		Status:     "completed",
+	})
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("work", contracts.ProfileLimits{DailyTokenBudget: 1000}),
+	})
+	got := mustCandidate(t, result, "work")
+	if !got.Available {
+		t.Fatalf("candidate available = false, want recovered auth failure available: %+v", got)
+	}
+	if result.Recommendation == nil || result.Recommendation.Profile != "work" {
+		t.Fatalf("recommendation = %+v, want work", result.Recommendation)
+	}
+}
+
+func TestAuthenticationFailuresRespectIncludeUnavailable(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	store.addWorkFailure(contracts.HookEvent{
+		Event:     "StopFailure",
+		Timestamp: now.Add(-time.Hour),
+		Error:     "oauth_org_not_allowed",
+	})
+
+	result := evaluateWithOptions(t, store, []contracts.Profile{
+		profile("work", contracts.ProfileLimits{DailyTokenBudget: 1000}),
+	}, headroom.Options{IncludeUnavailable: true})
+	got := mustCandidate(t, result, "work")
+	if !got.Available {
+		t.Fatalf("candidate available = false with IncludeUnavailable, want true: %+v", got)
+	}
+	if result.Recommendation == nil || result.Recommendation.Profile != "work" {
+		t.Fatalf("recommendation = %+v, want work", result.Recommendation)
+	}
+}
+
 func TestNoBudgetHeuristicRanksLowerRecentUsageAndHigherPriority(t *testing.T) {
 	now := testNow()
 	store := newFakeStore(now)
@@ -288,6 +338,7 @@ type fakeStore struct {
 	now      time.Time
 	usage    []usageEvent
 	failures map[string][]contracts.HookEvent
+	sessions map[string][]contracts.SessionTelemetry
 	health   map[string]contracts.ProfileHealth
 }
 
@@ -302,6 +353,7 @@ func newFakeStore(now time.Time) *fakeStore {
 	return &fakeStore{
 		now:      now,
 		failures: make(map[string][]contracts.HookEvent),
+		sessions: make(map[string][]contracts.SessionTelemetry),
 		health:   make(map[string]contracts.ProfileHealth),
 	}
 }
@@ -313,6 +365,11 @@ func (s *fakeStore) addUsage(profile string, at time.Time, model string, usage c
 func (s *fakeStore) addWorkFailure(ev contracts.HookEvent) {
 	ev.Profile = "work"
 	s.failures["work"] = append(s.failures["work"], ev)
+}
+
+func (s *fakeStore) addWorkSession(session contracts.SessionTelemetry) {
+	session.Profile = "work"
+	s.sessions["work"] = append(s.sessions["work"], session)
 }
 
 func (s *fakeStore) QueryUsage(_ context.Context, q contracts.UsageQuery) ([]contracts.UsageRow, error) {
@@ -348,8 +405,21 @@ func (s *fakeStore) QueryRecentFailures(_ context.Context, profileName string, s
 	return failures, nil
 }
 
-func (s *fakeStore) QuerySessions(context.Context, contracts.SessionQuery) ([]contracts.SessionTelemetry, error) {
-	return nil, nil
+func (s *fakeStore) QuerySessions(_ context.Context, q contracts.SessionQuery) ([]contracts.SessionTelemetry, error) {
+	sessions := append([]contracts.SessionTelemetry(nil), s.sessions[q.Profile]...)
+	sessions = slices.DeleteFunc(sessions, func(session contracts.SessionTelemetry) bool {
+		if q.Status != "" && session.Status != q.Status {
+			return true
+		}
+		return !q.Since.IsZero() && session.LastSeenAt.Before(q.Since)
+	})
+	slices.SortFunc(sessions, func(a, b contracts.SessionTelemetry) int {
+		return b.LastSeenAt.Compare(a.LastSeenAt)
+	})
+	if q.Limit > 0 && len(sessions) > q.Limit {
+		sessions = sessions[:q.Limit]
+	}
+	return sessions, nil
 }
 
 func (s *fakeStore) GetProfileHealth(_ context.Context, profileName string) (contracts.ProfileHealth, error) {

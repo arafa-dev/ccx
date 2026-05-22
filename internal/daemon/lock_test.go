@@ -14,7 +14,7 @@ func TestLockReleaseDoesNotDeleteAnotherOwner(t *testing.T) {
 	root := t.TempDir()
 	paths := RuntimePaths(root)
 
-	lock, err := acquireDaemonLock(&paths, time.Minute, "owner-a", func(int) bool { return false })
+	lock, err := acquireDaemonLock(&paths, time.Minute, "owner-a", testProcessIdentity(os.Getpid()), func(*daemonLockRecord) bool { return false })
 	if err != nil {
 		t.Fatalf("acquire lock: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestLockReleaseDoesNotDeleteSameTokenDifferentPID(t *testing.T) {
 	root := t.TempDir()
 	paths := RuntimePaths(root)
 
-	lock, err := acquireDaemonLock(&paths, time.Minute, "shared-token", func(int) bool { return false })
+	lock, err := acquireDaemonLock(&paths, time.Minute, "shared-token", testProcessIdentity(os.Getpid()), func(*daemonLockRecord) bool { return false })
 	if err != nil {
 		t.Fatalf("acquire lock: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestLockReleaseDoesNotDeleteReplacedLockAfterRead(t *testing.T) {
 	root := t.TempDir()
 	paths := RuntimePaths(root)
 
-	lock, err := acquireDaemonLock(&paths, time.Minute, "owner-a", func(int) bool { return false })
+	lock, err := acquireDaemonLock(&paths, time.Minute, "owner-a", testProcessIdentity(os.Getpid()), func(*daemonLockRecord) bool { return false })
 	if err != nil {
 		t.Fatalf("acquire lock: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestStaleLockRecoveryDoesNotRemoveReplacedOwner(t *testing.T) {
 	})
 	defer restoreHook()
 
-	lock, err := acquireDaemonLock(&paths, time.Millisecond, "requester", func(int) bool { return false })
+	lock, err := acquireDaemonLock(&paths, time.Millisecond, "requester", testProcessIdentity(os.Getpid()), func(*daemonLockRecord) bool { return false })
 	if err == nil {
 		lock.release()
 		t.Fatal("expected replaced lock to remain busy")
@@ -100,7 +100,9 @@ func TestStaleLockRecoveryKeepsLiveOwner(t *testing.T) {
 	old := time.Now().Add(-2 * time.Hour)
 	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "live-owner", PID: 44, CreatedAt: old})
 
-	lock, err := acquireDaemonLock(&paths, time.Millisecond, "requester", func(pid int) bool { return pid == 44 })
+	lock, err := acquireDaemonLock(&paths, time.Millisecond, "requester", testProcessIdentity(os.Getpid()), func(record *daemonLockRecord) bool {
+		return record != nil && record.PID == 44 && record.ProcessIdentity == testProcessIdentity(44)
+	})
 	if err == nil {
 		lock.release()
 		t.Fatal("expected live stale owner to block acquire")
@@ -119,7 +121,7 @@ func TestChildAdoptFailsWhenTokenMismatches(t *testing.T) {
 	paths := RuntimePaths(root)
 	writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "parent-token", PID: 11, ChildPID: 22, CreatedAt: time.Now().UTC()})
 
-	lock, err := adoptDaemonLock(&paths, "child-token", 11, 22)
+	lock, err := adoptDaemonLock(&paths, "child-token", 11, 22, testProcessIdentity(22))
 	if err == nil {
 		lock.release()
 		t.Fatal("expected token mismatch to fail")
@@ -137,7 +139,7 @@ func TestChildAdoptFailsWhenLockMissing(t *testing.T) {
 	root := t.TempDir()
 	paths := RuntimePaths(root)
 
-	lock, err := adoptDaemonLock(&paths, "parent-token", 11, 22)
+	lock, err := adoptDaemonLock(&paths, "parent-token", 11, 22, testProcessIdentity(22))
 	if err == nil {
 		lock.release()
 		t.Fatal("expected missing lock adopt to fail")
@@ -156,7 +158,7 @@ func TestChildAdoptDoesNotClobberReplacedLock(t *testing.T) {
 	})
 	defer restoreHook()
 
-	lock, err := adoptDaemonLock(&paths, "parent-token", 11, 22)
+	lock, err := adoptDaemonLock(&paths, "parent-token", 11, 22, testProcessIdentity(22))
 	if err == nil {
 		lock.release()
 		t.Fatal("expected replaced lock adopt to fail")
@@ -177,7 +179,7 @@ func TestChildAdoptWithRetryWaitsForParentChildPIDClaim(t *testing.T) {
 		writeLockRecordForTest(t, &paths, daemonLockRecord{Token: "parent-token", PID: 11, ChildPID: 22, CreatedAt: time.Now().UTC()})
 	}()
 
-	lock, err := adoptDaemonLockWithRetry(context.Background(), &paths, "parent-token", 11, 22, time.Second)
+	lock, err := adoptDaemonLockWithRetry(context.Background(), &paths, "parent-token", 11, 22, testProcessIdentity(22), time.Second)
 	if err != nil {
 		t.Fatalf("adopt with retry: %v", err)
 	}
@@ -193,7 +195,13 @@ func writeLockRecordForTest(t *testing.T, paths *Paths, record daemonLockRecord)
 	if err := os.MkdirAll(filepath.Dir(paths.LockPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeLockRecord(paths.LockPath, record); err != nil {
+	if record.ProcessIdentity == "" && record.PID > 0 {
+		record.ProcessIdentity = testProcessIdentity(record.PID)
+	}
+	if record.ChildProcessIdentity == "" && record.ChildPID > 0 {
+		record.ChildProcessIdentity = testProcessIdentity(record.ChildPID)
+	}
+	if err := writeLockRecord(paths.LockPath, &record); err != nil {
 		t.Fatal(err)
 	}
 }

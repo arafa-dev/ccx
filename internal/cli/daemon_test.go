@@ -212,13 +212,14 @@ type cliFakeProcess struct {
 	mu             sync.Mutex
 	root           string
 	alive          map[int]bool
+	identities     map[int]string
 	nextPID        int
 	startCalls     int
 	terminateCalls int
 }
 
 func newCLIFakeProcess(root string) *cliFakeProcess {
-	return &cliFakeProcess{root: root, alive: map[int]bool{}, nextPID: 9001}
+	return &cliFakeProcess{root: root, alive: map[int]bool{}, identities: map[int]string{}, nextPID: 9001}
 }
 
 func (f *cliFakeProcess) Alive(pid int) bool {
@@ -231,11 +232,21 @@ func (f *cliFakeProcess) Matches(int, string) bool {
 	return true
 }
 
+func (f *cliFakeProcess) Identity(pid int) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if identity, ok := f.identities[pid]; ok {
+		return identity, true
+	}
+	return cliTestProcessIdentity(pid), true
+}
+
 func (f *cliFakeProcess) StartDetached(_ context.Context, spec *daemon.StartProcessSpec) (int, error) {
 	f.mu.Lock()
 	f.startCalls++
 	pid := f.nextPID
 	f.alive[pid] = true
+	f.identities[pid] = cliTestProcessIdentity(pid)
 	f.mu.Unlock()
 	port := 7777
 	for i, arg := range spec.Args {
@@ -289,15 +300,23 @@ func writeDaemonRuntimeLocked(root string, status contracts.DaemonStatus) {
 	if status.Running && status.StartToken == "" {
 		status.StartToken = "test-token"
 	}
+	if status.Running && status.ProcessIdentity == "" && status.PID > 0 {
+		status.ProcessIdentity = cliTestProcessIdentity(status.PID)
+	}
 	data, _ := json.Marshal(status)
 	_ = os.WriteFile(paths.StatusPath, data, 0o600)
 	_ = os.WriteFile(paths.PIDPath, []byte(strconv.Itoa(status.PID)+"\n"), 0o600)
 	if status.Running && status.StartToken != "" {
 		lockData, _ := json.Marshal(map[string]any{
-			"token":      status.StartToken,
-			"pid":        status.PID,
-			"created_at": time.Now().UTC(),
+			"token":            status.StartToken,
+			"pid":              status.PID,
+			"process_identity": status.ProcessIdentity,
+			"created_at":       time.Now().UTC(),
 		})
 		_ = os.WriteFile(paths.LockPath, append(lockData, '\n'), 0o600)
 	}
+}
+
+func cliTestProcessIdentity(pid int) string {
+	return "pid:" + strconv.Itoa(pid)
 }

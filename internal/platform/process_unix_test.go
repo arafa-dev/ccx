@@ -29,6 +29,19 @@ func TestProcessAliveTreatsZombieAsDead(t *testing.T) {
 	if ProcessAlive(pid) {
 		t.Fatalf("zombie pid %d reported alive", pid)
 	}
+	if identity, ok := ProcessIdentity(pid); ok || identity != "" {
+		t.Fatalf("zombie pid %d identity = %q/%v, want empty/false", pid, identity, ok)
+	}
+}
+
+func TestLinuxProcStatStartTime(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux /proc parser")
+	}
+	stat := "1234 (ccx daemon) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 424242 20"
+	if got := linuxProcStatStartTime(stat); got != "424242" {
+		t.Fatalf("linuxProcStatStartTime = %q, want 424242", got)
+	}
 }
 
 func processZombieStateForTest(pid int) (bool, error) {

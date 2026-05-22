@@ -27,17 +27,20 @@ var ErrStartInProgress = errors.New("daemon start already in progress")
 var errLockChildPIDPending = errors.New("daemon lock child pid pending")
 
 type daemonLockRecord struct {
-	Token     string    `json:"token"`
-	PID       int       `json:"pid"`
-	ChildPID  int       `json:"child_pid,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Token                string    `json:"token"`
+	PID                  int       `json:"pid"`
+	ProcessIdentity      string    `json:"process_identity,omitempty"`
+	ChildPID             int       `json:"child_pid,omitempty"`
+	ChildProcessIdentity string    `json:"child_process_identity,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
 }
 
 type daemonLock struct {
-	path  string
-	token string
-	pid   int
-	owned bool
+	path            string
+	token           string
+	pid             int
+	processIdentity string
+	owned           bool
 }
 
 var (
@@ -72,7 +75,7 @@ func setSetChildPIDErrorHookForTest(err error) func() {
 	}
 }
 
-func acquireDaemonLock(paths *Paths, staleAfter time.Duration, token string, ownerAlive func(int) bool) (*daemonLock, error) {
+func acquireDaemonLock(paths *Paths, staleAfter time.Duration, token, ownerIdentity string, ownerAlive func(*daemonLockRecord) bool) (*daemonLock, error) {
 	if staleAfter <= 0 {
 		staleAfter = defaultLockStaleAfter
 	}
@@ -85,10 +88,10 @@ func acquireDaemonLock(paths *Paths, staleAfter time.Duration, token string, own
 	}
 	ownerPID := os.Getpid()
 	for attempts := 0; attempts < 2; attempts++ {
-		record := daemonLockRecord{Token: token, PID: ownerPID, CreatedAt: time.Now().UTC()}
+		record := daemonLockRecord{Token: token, PID: ownerPID, ProcessIdentity: ownerIdentity, CreatedAt: time.Now().UTC()}
 		file, err := os.OpenFile(paths.LockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // path is controlled by ccx home.
 		if err == nil {
-			if err := encodeLockRecord(file, record); err != nil {
+			if err := encodeLockRecord(file, &record); err != nil {
 				_ = file.Close()
 				_ = os.Remove(paths.LockPath)
 				return nil, err
@@ -97,7 +100,7 @@ func acquireDaemonLock(paths *Paths, staleAfter time.Duration, token string, own
 				_ = os.Remove(paths.LockPath)
 				return nil, closeErr
 			}
-			return &daemonLock{path: paths.LockPath, token: token, pid: ownerPID, owned: true}, nil
+			return &daemonLock{path: paths.LockPath, token: token, pid: ownerPID, processIdentity: ownerIdentity, owned: true}, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("create daemon lock: %w", err)
@@ -106,10 +109,10 @@ func acquireDaemonLock(paths *Paths, staleAfter time.Duration, token string, own
 		if err != nil {
 			return nil, err
 		}
-		if lockRecordOwnerAlive(observed, ownerAlive) {
+		if lockRecordOwnerAlive(&observed, ownerAlive) {
 			return nil, ErrStartInProgress
 		}
-		if !lockRecordIsStale(observed, staleAfter) {
+		if !lockRecordIsStale(&observed, staleAfter) {
 			return nil, ErrStartInProgress
 		}
 		removed, err := removeObservedLock(paths.LockPath, observedBytes)
@@ -123,7 +126,7 @@ func acquireDaemonLock(paths *Paths, staleAfter time.Duration, token string, own
 	return nil, ErrStartInProgress
 }
 
-func adoptDaemonLock(paths *Paths, token string, parentPID, childPID int) (*daemonLock, error) {
+func adoptDaemonLock(paths *Paths, token string, parentPID, childPID int, childIdentity string) (*daemonLock, error) {
 	if token == "" {
 		return nil, fmt.Errorf("adopt daemon lock: token is empty")
 	}
@@ -146,23 +149,28 @@ func adoptDaemonLock(paths *Paths, token string, parentPID, childPID int) (*daem
 		}
 		return nil, fmt.Errorf("adopt daemon lock: child pid mismatch")
 	}
+	if record.ChildProcessIdentity != "" && childIdentity != "" && record.ChildProcessIdentity != childIdentity {
+		return nil, fmt.Errorf("adopt daemon lock: child identity mismatch")
+	}
 	record.PID = childPID
+	record.ProcessIdentity = childIdentity
 	record.ChildPID = 0
+	record.ChildProcessIdentity = ""
 	record.CreatedAt = time.Now().UTC()
-	if err := compareAndWriteLockRecord(paths.LockPath, observed, record, beforeLockAdoptWriteHook); err != nil {
+	if err := compareAndWriteLockRecord(paths.LockPath, observed, &record, beforeLockAdoptWriteHook); err != nil {
 		return nil, fmt.Errorf("adopt daemon lock: %w", err)
 	}
-	return &daemonLock{path: paths.LockPath, token: token, pid: childPID, owned: true}, nil
+	return &daemonLock{path: paths.LockPath, token: token, pid: childPID, processIdentity: childIdentity, owned: true}, nil
 }
 
-func adoptDaemonLockWithRetry(ctx context.Context, paths *Paths, token string, parentPID, childPID int, timeout time.Duration) (*daemonLock, error) {
+func adoptDaemonLockWithRetry(ctx context.Context, paths *Paths, token string, parentPID, childPID int, childIdentity string, timeout time.Duration) (*daemonLock, error) {
 	if timeout <= 0 {
 		timeout = defaultStartupWait
 	}
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {
-		lock, err := adoptDaemonLock(paths, token, parentPID, childPID)
+		lock, err := adoptDaemonLock(paths, token, parentPID, childPID, childIdentity)
 		if err == nil {
 			return lock, nil
 		}
@@ -204,7 +212,7 @@ func readLockRecord(path string) (daemonLockRecord, []byte, error) {
 	return record, data, nil
 }
 
-func writeLockRecord(path string, record daemonLockRecord) error {
+func writeLockRecord(path string, record *daemonLockRecord) error {
 	data, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("encode daemon lock: %w", err)
@@ -230,7 +238,7 @@ func writeLockRecord(path string, record daemonLockRecord) error {
 	return nil
 }
 
-func compareAndWriteLockRecord(path string, observed []byte, record daemonLockRecord, hook func()) error {
+func compareAndWriteLockRecord(path string, observed []byte, record *daemonLockRecord, hook func()) error {
 	if hook != nil {
 		hook()
 	}
@@ -244,7 +252,7 @@ func compareAndWriteLockRecord(path string, observed []byte, record daemonLockRe
 	return writeLockRecord(path, record)
 }
 
-func encodeLockRecord(file *os.File, record daemonLockRecord) error {
+func encodeLockRecord(file *os.File, record *daemonLockRecord) error {
 	data, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("encode daemon lock: %w", err)
@@ -255,21 +263,18 @@ func encodeLockRecord(file *os.File, record daemonLockRecord) error {
 	return nil
 }
 
-func lockRecordIsStale(record daemonLockRecord, staleAfter time.Duration) bool {
+func lockRecordIsStale(record *daemonLockRecord, staleAfter time.Duration) bool {
 	if record.CreatedAt.IsZero() {
 		return true
 	}
 	return time.Since(record.CreatedAt) > staleAfter
 }
 
-func lockRecordOwnerAlive(record daemonLockRecord, ownerAlive func(int) bool) bool {
+func lockRecordOwnerAlive(record *daemonLockRecord, ownerAlive func(*daemonLockRecord) bool) bool {
 	if ownerAlive == nil {
 		return false
 	}
-	if record.PID > 0 && ownerAlive(record.PID) {
-		return true
-	}
-	return record.ChildPID > 0 && ownerAlive(record.ChildPID)
+	return ownerAlive(record)
 }
 
 func removeObservedLock(path string, observed []byte) (bool, error) {
@@ -300,7 +305,7 @@ func (l *daemonLock) release() {
 		return
 	}
 	record, observed, err := readLockRecord(l.path)
-	if err == nil && record.Token == l.token && record.PID == l.pid {
+	if err == nil && record.Token == l.token && record.PID == l.pid && lockIdentityMatches(record.ProcessIdentity, l.processIdentity) {
 		_, _ = removeObservedLock(l.path, observed)
 	}
 	l.owned = false
@@ -316,7 +321,7 @@ func (l *daemonLock) releaseChildPID(childPID int) {
 	}
 }
 
-func (l *daemonLock) setChildPID(childPID int) error {
+func (l *daemonLock) setChildPID(childPID int, childIdentity string) error {
 	if l == nil || !l.owned {
 		return nil
 	}
@@ -331,11 +336,16 @@ func (l *daemonLock) setChildPID(childPID int) error {
 		return ErrStartInProgress
 	}
 	record.ChildPID = childPID
-	return compareAndWriteLockRecord(l.path, observed, record, nil)
+	record.ChildProcessIdentity = childIdentity
+	return compareAndWriteLockRecord(l.path, observed, &record, nil)
 }
 
 func (l *daemonLock) disown() {
 	if l != nil {
 		l.owned = false
 	}
+}
+
+func lockIdentityMatches(recordIdentity, expectedIdentity string) bool {
+	return expectedIdentity == "" || recordIdentity == "" || recordIdentity == expectedIdentity
 }

@@ -96,6 +96,7 @@ func TestTelemetryJSONUsesContractFieldNames(t *testing.T) {
 		URL:             "http://127.0.0.1:17333",
 		DBPath:          "/tmp/ccx.db",
 		LogPath:         "/tmp/ccx.log",
+		ProcessIdentity: "test-process-identity",
 		ProfilesWatched: 3,
 		Running:         true,
 	}
@@ -108,7 +109,7 @@ func TestTelemetryJSONUsesContractFieldNames(t *testing.T) {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		t.Fatalf("unmarshal DaemonStatus fields: %v", err)
 	}
-	for _, name := range []string{"pid", "version", "started_at", "port", "url", "db_path", "log_path", "profiles_watched", "running"} {
+	for _, name := range []string{"pid", "version", "started_at", "port", "url", "db_path", "log_path", "process_identity", "profiles_watched", "running"} {
 		if _, ok := fields[name]; !ok {
 			t.Errorf("marshaled DaemonStatus missing field %q in %s", name, data)
 		}

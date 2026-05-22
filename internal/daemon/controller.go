@@ -27,6 +27,7 @@ const (
 type ProcessManager interface {
 	Alive(pid int) bool
 	Matches(pid int, expectedExecutable string) bool
+	Identity(pid int) (string, bool)
 	StartDetached(ctx context.Context, spec *StartProcessSpec) (int, error)
 	Terminate(pid int) error
 }
@@ -90,7 +91,7 @@ func (c *Controller) Status(_ context.Context) (contracts.DaemonStatus, error) {
 		status.PID = pid
 	}
 	c.fillStatusDefaults(&paths, &status)
-	status.Running = hasStatus && status.PID > 0 && status.URL != "" && c.process().Alive(status.PID)
+	status.Running = hasStatus && status.PID > 0 && status.URL != "" && c.processOwns(status.PID, status.ProcessIdentity)
 	if status.Running {
 		expectedExecutable, err := c.expectedExecutable(status.ExecutablePath)
 		if err != nil || expectedExecutable == "" || !c.process().Matches(status.PID, expectedExecutable) {
@@ -130,7 +131,7 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 	if err != nil {
 		return StartResult{}, err
 	}
-	lock, err := acquireDaemonLock(&paths, c.lockStaleAfter(), token, c.process().Alive)
+	lock, err := acquireDaemonLock(&paths, c.lockStaleAfter(), token, c.processIdentity(os.Getpid()), c.lockOwnerAlive)
 	if err != nil {
 		status, statusErr := c.Status(ctx)
 		if statusErr != nil {
@@ -184,12 +185,12 @@ func (c *Controller) StartDetached(ctx context.Context, opts StartOptions) (Star
 	pid, err := c.process().StartDetached(ctx, spec)
 	if err != nil {
 		if pid > 0 {
-			_ = lock.setChildPID(pid)
+			_ = lock.setChildPID(pid, c.processIdentity(pid))
 			c.terminateSpawnedChildOrPreserveLock(ctx, pid, lock, &releaseLock)
 		}
 		return StartResult{}, fmt.Errorf("start detached daemon: %w", err)
 	}
-	if err := lock.setChildPID(pid); err != nil {
+	if err := lock.setChildPID(pid, c.processIdentity(pid)); err != nil {
 		c.terminateSpawnedChildOrPreserveLock(ctx, pid, lock, &releaseLock)
 		return StartResult{}, err
 	}
@@ -226,7 +227,7 @@ func (c *Controller) Stop(ctx context.Context) (StopResult, error) {
 				return StopResult{}, err
 			}
 			removePIDIf(&paths, status.PID)
-			removeLockIfOwner(&paths, status.StartToken, status.PID)
+			removeLockIfOwner(&paths, status.StartToken, status.PID, status.ProcessIdentity)
 		}
 		return StopResult{Status: status}, nil
 	}
@@ -243,7 +244,7 @@ func (c *Controller) Stop(ctx context.Context) (StopResult, error) {
 				return StopResult{}, err
 			}
 			removePIDIf(&paths, status.PID)
-			removeLockIfOwner(&paths, status.StartToken, status.PID)
+			removeLockIfOwner(&paths, status.StartToken, status.PID, status.ProcessIdentity)
 			return StopResult{Status: status, Stopped: true}, nil
 		}
 		select {
@@ -327,15 +328,18 @@ func statusLockMatches(paths *Paths, status *contracts.DaemonStatus) bool {
 	if err != nil {
 		return false
 	}
-	return record.Token == status.StartToken && record.PID == status.PID
+	return record.Token == status.StartToken &&
+		record.PID == status.PID &&
+		status.ProcessIdentity != "" &&
+		record.ProcessIdentity == status.ProcessIdentity
 }
 
 func (c *Controller) removeAbandonedStatusRuntime(paths *Paths, status *contracts.DaemonStatus) {
-	if status.PID <= 0 || c.process().Alive(status.PID) {
+	if status.PID <= 0 || c.processOwns(status.PID, status.ProcessIdentity) {
 		return
 	}
 	removePIDIf(paths, status.PID)
-	removeLockIfOwner(paths, status.StartToken, status.PID)
+	removeLockIfOwner(paths, status.StartToken, status.PID, status.ProcessIdentity)
 }
 
 func (c *Controller) root() (string, error) {
@@ -391,6 +395,32 @@ func (c *Controller) fillStatusDefaults(paths *Paths, status *contracts.DaemonSt
 	}
 }
 
+func (c *Controller) processIdentity(pid int) string {
+	identity, ok := c.process().Identity(pid)
+	if !ok {
+		return ""
+	}
+	return identity
+}
+
+func (c *Controller) processOwns(pid int, identity string) bool {
+	if identity == "" || !c.process().Alive(pid) {
+		return false
+	}
+	got, ok := c.process().Identity(pid)
+	return ok && got == identity
+}
+
+func (c *Controller) lockOwnerAlive(record *daemonLockRecord) bool {
+	if record == nil {
+		return false
+	}
+	if record.PID > 0 && c.processOwns(record.PID, record.ProcessIdentity) {
+		return true
+	}
+	return record.ChildPID > 0 && c.processOwns(record.ChildPID, record.ChildProcessIdentity)
+}
+
 type osProcessManager struct{}
 
 func (osProcessManager) Alive(pid int) bool {
@@ -399,6 +429,10 @@ func (osProcessManager) Alive(pid int) bool {
 
 func (osProcessManager) Matches(pid int, expectedExecutable string) bool {
 	return platform.ProcessMatches(pid, expectedExecutable)
+}
+
+func (osProcessManager) Identity(pid int) (string, bool) {
+	return platform.ProcessIdentity(pid)
 }
 
 func (osProcessManager) StartDetached(ctx context.Context, spec *StartProcessSpec) (int, error) {
