@@ -175,16 +175,35 @@ func TestUsageEndpointRejectsNonPositiveSince(t *testing.T) {
 
 type mockStore struct {
 	contracts.Store
-	queryRows []contracts.UsageRow
-	queryErr  error
+	queryRows        []contracts.UsageRow
+	queryErr         error
+	sessions         []contracts.SessionTelemetry
+	lastSessionQuery contracts.SessionQuery
+	usageByProfile   map[string][]contracts.UsageRow
 }
 
 func (m *mockStore) ListProfiles(_ context.Context) ([]contracts.Profile, error) {
 	return []contracts.Profile{{Name: "demo", ConfigDir: "/tmp/demo"}}, nil
 }
 
-func (m *mockStore) QueryUsage(_ context.Context, _ contracts.UsageQuery) ([]contracts.UsageRow, error) {
+func (m *mockStore) QueryUsage(_ context.Context, q contracts.UsageQuery) ([]contracts.UsageRow, error) {
+	if m.usageByProfile != nil {
+		return append([]contracts.UsageRow(nil), m.usageByProfile[q.Profile]...), m.queryErr
+	}
 	return m.queryRows, m.queryErr
+}
+
+func (m *mockStore) QuerySessions(_ context.Context, q contracts.SessionQuery) ([]contracts.SessionTelemetry, error) {
+	m.lastSessionQuery = q
+	return append([]contracts.SessionTelemetry(nil), m.sessions...), nil
+}
+
+func (m *mockStore) QueryRecentFailures(context.Context, string, time.Time) ([]contracts.HookEvent, error) {
+	return nil, nil
+}
+
+func (m *mockStore) GetProfileHealth(context.Context, string) (contracts.ProfileHealth, error) {
+	return contracts.ProfileHealth{}, contracts.ErrProfileNotFound
 }
 
 type mockPricing struct {

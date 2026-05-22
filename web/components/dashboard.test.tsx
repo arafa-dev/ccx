@@ -3,7 +3,20 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Dashboard } from './dashboard';
 import { ThemeProvider } from './theme-provider';
-import type { ProfileWithTotals, UsageRow, UsageTotal } from '@/lib/api';
+import {
+  getDaemonStatus,
+  getHeadroom,
+  getHooksStatus,
+  getProfiles,
+  getSessions,
+  getUsage,
+  type HeadroomResponse,
+  type HookStatus,
+  type ProfileWithTotals,
+  type SessionTelemetry,
+  type UsageRow,
+  type UsageTotal,
+} from '@/lib/api';
 
 const profiles: ProfileWithTotals[] = [
   {
@@ -58,6 +71,65 @@ const allRows: UsageRow[] = [
   row('work', 'ccx'),
 ];
 
+const sessions: SessionTelemetry[] = [
+  {
+    profile: 'work',
+    session: 's1',
+    transcript: '',
+    cwd: '/Users/arafa/projects/ccx',
+    model: 'claude-opus-4-7',
+    source: 'hook',
+    permission: '',
+    started_at: '2026-05-19T12:00:00Z',
+    ended_at: '2026-05-19T12:05:00Z',
+    last_seen_at: '2026-05-19T12:05:00Z',
+    status: 'completed',
+    end_reason: 'stop',
+    failure_error: '',
+    failure_details: '',
+    compact_count: 0,
+  },
+];
+
+const headroom: HeadroomResponse = {
+  recommendation: {
+    profile: 'work',
+    available: true,
+    score: 95,
+    headroom_percent: 87,
+    auth_status: 'ok',
+    reasons: ['daily tokens 150/100000', 'auth ok'],
+    priority: 5,
+    tokens_24h: 150,
+    tokens_7d: 1500,
+    usd_30d: 3,
+  },
+  candidates: [
+    {
+      profile: 'work',
+      available: true,
+      score: 95,
+      headroom_percent: 87,
+      auth_status: 'ok',
+      reasons: ['daily tokens 150/100000', 'auth ok'],
+      priority: 5,
+      tokens_24h: 150,
+      tokens_7d: 1500,
+      usd_30d: 3,
+    },
+  ],
+};
+
+const hooks: HookStatus[] = [
+  {
+    profile: 'work',
+    installed: true,
+    status: 'installed',
+    disabled: false,
+    settings_path: '/Users/arafa/.claude-profiles/work/settings.json',
+  },
+];
+
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('@/lib/api');
   return {
@@ -68,6 +140,15 @@ vi.mock('@/lib/api', async () => {
       return { rows, total: blankTotal() };
     }),
     getHealth: vi.fn(async () => ({ ok: true, version: '0.1.0-test' })),
+    getDaemonStatus: vi.fn(async () => ({
+      mode: 'foreground',
+      status: 'running',
+      running: false,
+      version: '0.1.0-test',
+    })),
+    getHeadroom: vi.fn(async () => headroom),
+    getSessions: vi.fn(async () => sessions),
+    getHooksStatus: vi.fn(async () => hooks),
     streamUsage: vi.fn(() => () => {}),
   };
 });
@@ -106,5 +187,34 @@ describe('<Dashboard>', () => {
       expect(within(topProjects).queryByText('hobby')).not.toBeInTheDocument();
       expect(within(topProjects).getByText('acme')).toBeInTheDocument();
     });
+  });
+
+  it('fetches daemon, headroom, sessions, hooks, profiles, and usage for the dashboard', async () => {
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    await screen.findByRole('region', { name: /recommended profile/i });
+    expect(getDaemonStatus).toHaveBeenCalledOnce();
+    expect(getHeadroom).toHaveBeenCalledOnce();
+    expect(getSessions).toHaveBeenCalledWith({ since: '7d' });
+    expect(getHooksStatus).toHaveBeenCalledOnce();
+    expect(getProfiles).toHaveBeenCalledOnce();
+    expect(getUsage).toHaveBeenCalledWith({ profile: undefined, since: '7d' });
+  });
+
+  it('renders daemon mode, recommendation, telemetry, and hook health', async () => {
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByLabelText(/daemon status running/i)).toHaveTextContent('foreground');
+    expect(screen.getByRole('region', { name: /recommended profile/i })).toHaveTextContent('work');
+    expect(screen.getByRole('region', { name: /session telemetry/i })).toHaveTextContent('ccx');
+    expect(screen.getByText(/hooks installed/i)).toBeInTheDocument();
   });
 });

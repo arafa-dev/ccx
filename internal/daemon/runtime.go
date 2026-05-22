@@ -8,10 +8,13 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
 	"github.com/arafa-dev/ccx/internal/dashboard"
+	"github.com/arafa-dev/ccx/internal/headroom"
+	"github.com/arafa-dev/ccx/internal/hooks"
 	"github.com/arafa-dev/ccx/internal/platform"
 	"github.com/arafa-dev/ccx/internal/server"
 )
@@ -101,11 +104,15 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if err != nil {
 		return fmt.Errorf("dashboard assets: %w", err)
 	}
+	statusProvider := &currentStatusProvider{}
 	srv := server.New(server.Deps{
 		Store:    deps.Store,
 		Pricing:  deps.Pricing,
 		Profiles: deps.Profiles,
 		WebRoot:  webFS,
+		Daemon:   statusProvider,
+		Hooks:    &hooks.Service{Profiles: deps.Profiles},
+		Headroom: headroom.Evaluator{Store: deps.Store, Pricing: deps.Pricing},
 	}, opts.Version)
 
 	startPort, endPort := defaultStartPort, defaultEndPort
@@ -132,6 +139,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if err := writeStatus(&paths, &status); err != nil {
 		return err
 	}
+	statusProvider.Set(&status)
 	if opts.OnStatus != nil {
 		opts.OnStatus(status)
 	}
@@ -154,4 +162,21 @@ func Run(ctx context.Context, opts RunOptions) error {
 		return err
 	}
 	return nil
+}
+
+type currentStatusProvider struct {
+	mu     sync.RWMutex
+	status contracts.DaemonStatus
+}
+
+func (p *currentStatusProvider) Set(status *contracts.DaemonStatus) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.status = *status
+}
+
+func (p *currentStatusProvider) Status(context.Context) (contracts.DaemonStatus, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.status, nil
 }

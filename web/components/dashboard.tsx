@@ -5,20 +5,33 @@ import { Footer } from './footer';
 import { Header, type LiveStatus } from './header';
 import { ProfileCards } from './profile-cards';
 import { RecentSessions } from './recent-sessions';
+import { RecommendationPanel } from './recommendation-panel';
 import { TimeSeriesChart } from './time-series-chart';
 import { TopProjects } from './top-projects';
 import {
+  getDaemonStatus,
+  getHeadroom,
   getHealth,
+  getHooksStatus,
   getProfiles,
+  getSessions,
   getUsage,
   streamUsage,
+  type DaemonStatus,
+  type HeadroomResponse,
+  type HookStatus,
   type ProfileWithTotals,
+  type SessionTelemetry,
   type UsageRow,
 } from '@/lib/api';
 
 export function Dashboard() {
   const [profiles, setProfiles] = useState<ProfileWithTotals[]>([]);
   const [usageRows, setUsageRows] = useState<UsageRow[]>([]);
+  const [sessions, setSessions] = useState<SessionTelemetry[]>([]);
+  const [daemonStatus, setDaemonStatus] = useState<DaemonStatus | null>(null);
+  const [headroom, setHeadroom] = useState<HeadroomResponse | null>(null);
+  const [hookStatuses, setHookStatuses] = useState<HookStatus[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [live, setLive] = useState<LiveStatus>('connecting');
   const [refreshedAt, setRefreshedAt] = useState<Date>(new Date());
@@ -26,12 +39,24 @@ export function Dashboard() {
 
   const refresh = useCallback(async () => {
     try {
-      const [p, u] = await Promise.all([
+      const usageParams = { profile: selectedProfile ?? undefined, since: '7d' };
+      const sessionParams = selectedProfile
+        ? { profile: selectedProfile, since: '7d' }
+        : { since: '7d' };
+      const [p, u, d, h, sessionRows, hookRows] = await Promise.all([
         getProfiles(),
-        getUsage({ profile: selectedProfile ?? undefined, since: '7d' }),
+        getUsage(usageParams),
+        getDaemonStatus(),
+        getHeadroom(),
+        getSessions(sessionParams),
+        getHooksStatus(),
       ]);
       setProfiles(p);
       setUsageRows(u.rows);
+      setDaemonStatus(d);
+      setHeadroom(h);
+      setSessions(sessionRows);
+      setHookStatuses(hookRows);
       setRefreshedAt(new Date());
       setLoadError(null);
     } catch (e) {
@@ -78,6 +103,7 @@ export function Dashboard() {
         selected={selectedProfile}
         onSelect={setSelectedProfile}
         live={live}
+        daemon={daemonStatus}
       />
 
       <main className="flex flex-col gap-6 px-6 py-6">
@@ -96,11 +122,14 @@ export function Dashboard() {
                 selectedProfile ? profiles.filter((p) => p.name === selectedProfile) : profiles
               }
               usageRows={usageRows}
+              candidates={headroom?.candidates ?? []}
+              hookStatuses={hookStatuses}
             />
+            <RecommendationPanel headroom={headroom} />
             <TimeSeriesChart usageRows={usageRows} profiles={profileMeta} />
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <TopProjects usageRows={usageRows} />
-              <RecentSessions usageRows={usageRows} profiles={profileMeta} />
+              <RecentSessions sessions={sessions} profiles={profileMeta} />
             </div>
           </>
         )}

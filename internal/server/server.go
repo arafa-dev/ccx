@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
+	"github.com/arafa-dev/ccx/internal/headroom"
+	"github.com/arafa-dev/ccx/internal/hooks"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -20,11 +22,35 @@ type Deps struct {
 	Pricing  contracts.PricingTable
 	Profiles ProfileLister
 	WebRoot  http.FileSystem
+	Daemon   DaemonStatusProvider
+	Hooks    HookStatusProvider
+	Headroom HeadroomEvaluator
+	Ingestor HeadroomIngestor
 }
 
 // ProfileLister exposes the subset of the profile manager the server needs.
 type ProfileLister interface {
 	List(ctx context.Context) ([]contracts.Profile, error)
+}
+
+// DaemonStatusProvider reports the current daemon runtime status.
+type DaemonStatusProvider interface {
+	Status(ctx context.Context) (contracts.DaemonStatus, error)
+}
+
+// HookStatusProvider reports hook installation status.
+type HookStatusProvider interface {
+	Status(ctx context.Context, opts hooks.StatusOptions) ([]hooks.Result, error)
+}
+
+// HeadroomEvaluator evaluates profile headroom candidates.
+type HeadroomEvaluator interface {
+	Evaluate(ctx context.Context, profiles []contracts.Profile, opts headroom.Options) (headroom.Result, error)
+}
+
+// HeadroomIngestor best-effort ingests profiles before headroom evaluation.
+type HeadroomIngestor interface {
+	IngestHeadroomProfiles(ctx context.Context, profiles []contracts.Profile) (map[string]string, error)
 }
 
 // Server is the local HTTP server.
@@ -35,7 +61,7 @@ type Server struct {
 }
 
 // New constructs a Server.
-func New(deps Deps, version string) *Server {
+func New(deps Deps, version string) *Server { //nolint:gocritic // Deps is a one-time wiring value copied at construction.
 	s := &Server{deps: deps, version: version, mux: chi.NewRouter()}
 	s.routes()
 	return s
@@ -86,6 +112,10 @@ func (s *Server) routes() {
 	s.mux.Get("/api/profiles", s.handleProfiles)
 	s.mux.Get("/api/usage", s.handleUsage)
 	s.mux.Get("/api/usage/live", s.handleUsageLive)
+	s.mux.Get("/api/daemon/status", s.handleDaemonStatus)
+	s.mux.Get("/api/hooks/status", s.handleHooksStatus)
+	s.mux.Get("/api/sessions", s.handleSessions)
+	s.mux.Get("/api/headroom", s.handleHeadroom)
 	if s.deps.WebRoot != nil {
 		s.mux.Handle("/*", http.FileServer(s.deps.WebRoot))
 	}

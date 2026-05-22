@@ -7,8 +7,11 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/arafa-dev/ccx/internal/contracts"
 	"github.com/arafa-dev/ccx/internal/daemon"
 	"github.com/arafa-dev/ccx/internal/dashboard"
+	"github.com/arafa-dev/ccx/internal/headroom"
+	"github.com/arafa-dev/ccx/internal/hooks"
 	"github.com/arafa-dev/ccx/internal/server"
 	"github.com/spf13/cobra"
 )
@@ -64,6 +67,9 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 				Pricing:  deps.Pricing,
 				Profiles: deps.Profiles,
 				WebRoot:  webFS,
+				Hooks:    &hooks.Service{Profiles: deps.Profiles},
+				Headroom: headroom.Evaluator{Store: deps.Store, Pricing: deps.Pricing},
+				Ingestor: dashboardHeadroomIngestor{deps: deps},
 			}, opts.Build.Version)
 
 			startPort := 7777
@@ -94,6 +100,14 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open a browser")
 	cmd.Flags().BoolVar(&daemonMode, "daemon", false, "start or use the background daemon")
 	return cmd
+}
+
+type dashboardHeadroomIngestor struct {
+	deps *Deps
+}
+
+func (i dashboardHeadroomIngestor) IngestHeadroomProfiles(ctx context.Context, profiles []contracts.Profile) (map[string]string, error) {
+	return ingestSuggestProfiles(ctx, i.deps, profiles)
 }
 
 func openOrPrintDashboard(c *cobra.Command, opts *Options, url string, noOpen bool) error {

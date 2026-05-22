@@ -5,6 +5,11 @@ export type ProfileWithTotals = components['schemas']['ProfileWithTotals'];
 export type Usage = components['schemas']['Usage'];
 export type UsageRow = components['schemas']['UsageRow'];
 export type UsageTotal = components['schemas']['UsageTotal'];
+export type DaemonStatus = components['schemas']['DaemonStatus'];
+export type HookStatus = components['schemas']['HookStatus'];
+export type SessionTelemetry = components['schemas']['SessionTelemetry'];
+export type HeadroomCandidate = components['schemas']['HeadroomCandidate'];
+export type HeadroomResponse = components['schemas']['HeadroomResponse'];
 
 export interface HealthResponse {
   ok: boolean;
@@ -21,6 +26,14 @@ export interface GetUsageParams {
   project?: string;
   /** Duration like "24h", "7d", "30d". Default "24h" on the server. */
   since?: string;
+}
+
+export interface GetSessionsParams {
+  profile?: string;
+  status?: string;
+  /** Duration like "24h", "7d", "30d". Default "24h" on the server. */
+  since?: string;
+  limit?: number;
 }
 
 /** API base URL. Reads NEXT_PUBLIC_API_BASE at build time, falls back to same-origin. */
@@ -64,6 +77,33 @@ export async function getUsage(params: GetUsageParams = {}): Promise<UsageRespon
   return getJSON<UsageResponse>(`/api/usage${suffix}`);
 }
 
+export async function getDaemonStatus(): Promise<DaemonStatus> {
+  return getJSON<DaemonStatus>('/api/daemon/status');
+}
+
+export async function getHooksStatus(profile?: string): Promise<HookStatus[]> {
+  const qs = new URLSearchParams();
+  if (profile) qs.set('profile', profile);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return getJSON<HookStatus[]>(`/api/hooks/status${suffix}`);
+}
+
+export async function getSessions(
+  params: GetSessionsParams = {},
+): Promise<SessionTelemetry[]> {
+  const qs = new URLSearchParams();
+  if (params.profile) qs.set('profile', params.profile);
+  if (params.status) qs.set('status', params.status);
+  if (params.since) qs.set('since', params.since);
+  if (params.limit) qs.set('limit', String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return getJSON<SessionTelemetry[]>(`/api/sessions${suffix}`);
+}
+
+export async function getHeadroom(): Promise<HeadroomResponse> {
+  return getJSON<HeadroomResponse>('/api/headroom');
+}
+
 /**
  * streamUsage opens an SSE connection to /api/usage/live and invokes onRows
  * for each emitted UsageRow array. Returns a teardown function.
@@ -98,5 +138,21 @@ type _ProfilesCheck =
   paths['/api/profiles']['get']['responses']['200']['content']['application/json'];
 type _UsageCheck =
   paths['/api/usage']['get']['responses']['200']['content']['application/json'];
+type _DaemonStatusCheck =
+  paths['/api/daemon/status']['get']['responses']['200']['content']['application/json'];
+type _HooksStatusCheck =
+  paths['/api/hooks/status']['get']['responses']['200']['content']['application/json'];
+type _SessionsCheck =
+  paths['/api/sessions']['get']['responses']['200']['content']['application/json'];
+type _HeadroomCheck =
+  paths['/api/headroom']['get']['responses']['200']['content']['application/json'];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _Assert = [_HealthCheck, _ProfilesCheck, _UsageCheck];
+type _Assert = [
+  _HealthCheck,
+  _ProfilesCheck,
+  _UsageCheck,
+  _DaemonStatusCheck,
+  _HooksStatusCheck,
+  _SessionsCheck,
+  _HeadroomCheck,
+];

@@ -77,6 +77,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Daemon runtime status */
+        get: operations["getDaemonStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hooks/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Hook installation status */
+        get: operations["getHooksStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent session telemetry */
+        get: operations["getSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/headroom": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Profile headroom recommendation */
+        get: operations["getHeadroom"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -115,6 +183,76 @@ export interface components {
             usage: components["schemas"]["Usage"];
             /** Format: double */
             estimated_usd: number;
+        };
+        DaemonStatus: {
+            /** @enum {string} */
+            mode: "daemon" | "foreground" | "offline";
+            /** @enum {string} */
+            status: "running" | "offline" | "starting";
+            pid?: number;
+            version: string;
+            /** Format: date-time */
+            started_at?: string;
+            port?: number;
+            url?: string;
+            db_path?: string;
+            log_path?: string;
+            executable_path?: string;
+            profiles_watched?: number;
+            running: boolean;
+        };
+        HookStatus: {
+            profile: string;
+            installed: boolean;
+            /** @enum {string} */
+            status: "missing" | "invalid" | "partial" | "disabled" | "installed";
+            disabled: boolean;
+            settings_path: string;
+            backup_path?: string;
+            message?: string;
+            error?: string;
+        };
+        SessionTelemetry: {
+            profile: string;
+            session: string;
+            transcript: string;
+            cwd: string;
+            model: string;
+            source: string;
+            permission: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            ended_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            status: string;
+            end_reason: string;
+            failure_error: string;
+            failure_details: string;
+            compact_count: number;
+        };
+        HeadroomCandidate: {
+            profile: string;
+            available: boolean;
+            /** Format: double */
+            score: number;
+            /** Format: double */
+            headroom_percent: number;
+            auth_status: string;
+            /** Format: date-time */
+            cooldown_until?: string;
+            reasons: string[];
+            priority: number;
+            tokens_24h: number;
+            tokens_7d: number;
+            /** Format: double */
+            usd_30d: number;
+        };
+        HeadroomResponse: {
+            recommendation?: components["schemas"]["HeadroomCandidate"];
+            candidates: components["schemas"]["HeadroomCandidate"][];
+            error?: string;
         };
     };
     responses: never;
@@ -214,6 +352,98 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": string;
+                };
+            };
+        };
+    };
+    getDaemonStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current daemon or foreground dashboard status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaemonStatus"];
+                };
+            };
+        };
+    };
+    getHooksStatus: {
+        parameters: {
+            query?: {
+                /** @description Filter to one profile. Omit for all. */
+                profile?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-profile hook status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HookStatus"][];
+                };
+            };
+        };
+    };
+    getSessions: {
+        parameters: {
+            query?: {
+                /** @description Filter to one profile. Omit for all. */
+                profile?: string;
+                /** @description Filter by session status. */
+                status?: string;
+                /** @description Duration string like "24h", "7d", "30d". Default "24h". */
+                since?: string;
+                /** @description Maximum sessions to return. Default 50. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent sessions, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionTelemetry"][];
+                };
+            };
+        };
+    };
+    getHeadroom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recommendation and ranked candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeadroomResponse"];
                 };
             };
         };

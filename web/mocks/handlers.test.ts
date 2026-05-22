@@ -52,4 +52,36 @@ describe('MSW handlers cover every openapi.yaml endpoint', () => {
     const text = await res.text();
     expect(text).toContain('event: usage');
   });
+
+  it('GET /api/daemon/status', async () => {
+    const res = await fetch(`${base}/api/daemon/status`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { mode: string; status: string };
+    expect(body.mode).toBeTruthy();
+    expect(body.status).toBeTruthy();
+  });
+
+  it('GET /api/hooks/status', async () => {
+    const res = await fetch(`${base}/api/hooks/status`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { profile: string; status: string; settings_path: string }[];
+    expect(body.length).toBeGreaterThan(0);
+    expect(body[0]?.settings_path).toContain('settings.json');
+  });
+
+  it('GET /api/sessions filters by profile', async () => {
+    const res = await fetch(`${base}/api/sessions?profile=work&since=7d`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { profile: string; session: string }[];
+    expect(body.length).toBeGreaterThan(0);
+    for (const r of body) expect(r.profile).toBe('work');
+  });
+
+  it('GET /api/headroom', async () => {
+    const res = await fetch(`${base}/api/headroom`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { recommendation?: { profile: string }; candidates: unknown[] };
+    expect(body.recommendation?.profile).toBeTruthy();
+    expect(body.candidates.length).toBeGreaterThan(0);
+  });
 });

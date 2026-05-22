@@ -57,4 +57,17 @@ describe('<Header>', () => {
     renderHeader({ live: 'disconnected' });
     expect(screen.getByLabelText(/live updates disconnected/i)).toBeInTheDocument();
   });
+
+  it('shows daemon mode and status separately from live updates', () => {
+    renderHeader({
+      daemon: {
+        mode: 'daemon',
+        status: 'running',
+        running: true,
+        version: '0.1.0-test',
+        profiles_watched: 3,
+      },
+    });
+    expect(screen.getByLabelText(/daemon status running/i)).toHaveTextContent('daemon');
+  });
 });
