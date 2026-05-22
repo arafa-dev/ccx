@@ -314,7 +314,9 @@ func (c *Controller) terminateSpawnedChildOrPreserveLock(ctx context.Context, pi
 	if !c.waitForProcessDeath(ctx, pid) {
 		lock.disown()
 		*releaseLock = false
+		return
 	}
+	lock.releaseChildPID(pid)
 }
 
 func statusLockMatches(paths *Paths, status *contracts.DaemonStatus) bool {

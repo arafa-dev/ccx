@@ -403,6 +403,60 @@ func TestStartDetachedTimeoutWithLiveChildPreservesLock(t *testing.T) {
 	}
 }
 
+func TestStartDetachedTimeoutAfterChildAdoptDeadChildRemovesLockForRetry(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	proc := newFakeProcessManager()
+	proc.nextPID = 7655
+	proc.onStart = func(spec *StartProcessSpec, pid int) {
+		writePIDFile(t, spec.Root, pid)
+	}
+	c := Controller{
+		Root:           root,
+		Version:        "test",
+		Executable:     "/bin/ccx",
+		Process:        proc,
+		StartupTimeout: 75 * time.Millisecond,
+		StopTimeout:    50 * time.Millisecond,
+	}
+
+	first, err := c.StartDetached(ctx, StartOptions{Port: 7777, PollInterval: time.Minute})
+	if err == nil {
+		t.Fatal("expected first start to time out")
+	}
+	if !first.Started || first.Status.PID != 7655 {
+		t.Fatalf("first result = %+v", first)
+	}
+	if _, err := os.Stat(filepath.Join(root, "daemon.lock")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lock after dead child cleanup err = %v, want removed", err)
+	}
+
+	proc.nextPID = 8766
+	proc.onStart = func(spec *StartProcessSpec, pid int) {
+		writePIDFile(t, spec.Root, pid)
+		writeStatusFile(t, spec.Root, contracts.DaemonStatus{
+			PID:            pid,
+			Version:        spec.Version,
+			Port:           7778,
+			URL:            "http://127.0.0.1:7778",
+			DBPath:         filepath.Join(spec.Root, "state.db"),
+			LogPath:        spec.LogPath,
+			ExecutablePath: spec.Executable,
+			StartToken:     spec.StartToken,
+			Running:        true,
+			StartedAt:      time.Now().UTC(),
+		})
+	}
+
+	second, err := c.StartDetached(ctx, StartOptions{Port: 7778, PollInterval: time.Minute})
+	if err != nil {
+		t.Fatalf("StartDetached(retry): %v", err)
+	}
+	if !second.Started || second.Status.PID != 8766 || proc.startCalls != 2 {
+		t.Fatalf("second result = %+v startCalls=%d", second, proc.startCalls)
+	}
+}
+
 func TestStatusWithLiveNonDaemonPIDReportsNotRunning(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

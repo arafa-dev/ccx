@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -208,8 +209,23 @@ func writeLockRecord(path string, record daemonLockRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode daemon lock: %w", err)
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write daemon lock: %w", err)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".daemon.lock.*.tmp") //nolint:gosec // path is controlled by ccx home.
+	if err != nil {
+		return fmt.Errorf("create daemon lock temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write daemon lock temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close daemon lock temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("publish daemon lock: %w", err)
 	}
 	return nil
 }
@@ -288,6 +304,16 @@ func (l *daemonLock) release() {
 		_, _ = removeObservedLock(l.path, observed)
 	}
 	l.owned = false
+}
+
+func (l *daemonLock) releaseChildPID(childPID int) {
+	if l == nil || !l.owned || childPID <= 0 {
+		return
+	}
+	record, observed, err := readLockRecord(l.path)
+	if err == nil && record.Token == l.token && record.PID == childPID {
+		_, _ = removeObservedLock(l.path, observed)
+	}
 }
 
 func (l *daemonLock) setChildPID(childPID int) error {
