@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Footer } from './footer';
 import { Header, type LiveStatus } from './header';
 import { ProfileCards } from './profile-cards';
@@ -25,6 +25,14 @@ import {
   type UsageRow,
 } from '@/lib/api';
 
+function usageParams(profile: string | null) {
+  return { profile: profile ?? undefined, since: '7d' };
+}
+
+function sessionParams(profile: string | null) {
+  return profile ? { profile, since: '7d' } : { since: '7d' };
+}
+
 export function Dashboard() {
   const [profiles, setProfiles] = useState<ProfileWithTotals[]>([]);
   const [usageRows, setUsageRows] = useState<UsageRow[]>([]);
@@ -37,38 +45,97 @@ export function Dashboard() {
   const [live, setLive] = useState<LiveStatus>('connecting');
   const [refreshedAt, setRefreshedAt] = useState<Date>(new Date());
   const [loadError, setLoadError] = useState<string | null>(null);
+  const selectedProfileRef = useRef<string | null>(null);
+  const liveRefreshInFlight = useRef(false);
+  const profileRefreshToken = useRef(0);
 
-  const refresh = useCallback(async () => {
+  const refreshAll = useCallback(async (profile: string | null) => {
     try {
-      const usageParams = { profile: selectedProfile ?? undefined, since: '7d' };
-      const sessionParams = selectedProfile
-        ? { profile: selectedProfile, since: '7d' }
-        : { since: '7d' };
       const [p, u, d, h, sessionRows, hookRows] = await Promise.all([
         getProfiles(),
-        getUsage(usageParams),
+        getUsage(usageParams(profile)),
         getDaemonStatus(),
         getHeadroom(),
-        getSessions(sessionParams),
+        getSessions(sessionParams(profile)),
         getHooksStatus(),
       ]);
       setProfiles(p);
       setProfilesLoaded(true);
-      setUsageRows(u.rows);
       setDaemonStatus(d);
       setHeadroom(h);
-      setSessions(sessionRows);
       setHookStatuses(hookRows);
+      if (selectedProfileRef.current === profile) {
+        setUsageRows(u.rows);
+        setSessions(sessionRows);
+      }
       setRefreshedAt(new Date());
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
-  }, [selectedProfile]);
+  }, []);
+
+  const refreshProfileData = useCallback(async (profile: string | null) => {
+    const token = ++profileRefreshToken.current;
+    try {
+      const [p, u, sessionRows] = await Promise.all([
+        getProfiles(),
+        getUsage(usageParams(profile)),
+        getSessions(sessionParams(profile)),
+      ]);
+      if (token !== profileRefreshToken.current || selectedProfileRef.current !== profile) {
+        return;
+      }
+      setProfiles(p);
+      setProfilesLoaded(true);
+      setUsageRows(u.rows);
+      setSessions(sessionRows);
+      setRefreshedAt(new Date());
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const refreshLiveUsage = useCallback(async () => {
+    if (liveRefreshInFlight.current) {
+      return;
+    }
+
+    liveRefreshInFlight.current = true;
+    const profile = selectedProfileRef.current;
+    try {
+      const [p, u] = await Promise.all([
+        getProfiles(),
+        getUsage(usageParams(profile)),
+      ]);
+      if (selectedProfileRef.current !== profile) {
+        return;
+      }
+      setProfiles(p);
+      setProfilesLoaded(true);
+      setUsageRows(u.rows);
+      setRefreshedAt(new Date());
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      liveRefreshInFlight.current = false;
+    }
+  }, []);
+
+  const handleSelectProfile = useCallback(
+    (profile: string | null) => {
+      selectedProfileRef.current = profile;
+      setSelectedProfile(profile);
+      void refreshProfileData(profile);
+    },
+    [refreshProfileData],
+  );
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refreshAll(null);
+  }, [refreshAll]);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,12 +156,12 @@ export function Dashboard() {
       () => {
         setRefreshedAt(new Date());
         setLive('connected');
-        void refresh();
+        void refreshLiveUsage();
       },
       () => setLive('disconnected'),
     );
     return stop;
-  }, [refresh]);
+  }, [refreshLiveUsage]);
 
   const profileMeta = profiles.map((p) => ({ name: p.name, color: p.color }));
 
@@ -103,7 +170,7 @@ export function Dashboard() {
       <Header
         profiles={profileMeta}
         selected={selectedProfile}
-        onSelect={setSelectedProfile}
+        onSelect={handleSelectProfile}
         live={live}
         daemon={daemonStatus}
       />

@@ -1,19 +1,22 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Dashboard } from './dashboard';
 import { ThemeProvider } from './theme-provider';
 import {
   getDaemonStatus,
+  getHealth,
   getHeadroom,
   getHooksStatus,
   getProfiles,
   getSessions,
   getUsage,
+  streamUsage,
   type HeadroomResponse,
   type HookStatus,
   type ProfileWithTotals,
   type SessionTelemetry,
+  type UsageResponse,
   type UsageRow,
   type UsageTotal,
 } from '@/lib/api';
@@ -154,7 +157,25 @@ vi.mock('@/lib/api', async () => {
 });
 
 describe('<Dashboard>', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getProfiles).mockImplementation(async () => profiles);
+    vi.mocked(getUsage).mockImplementation(async ({ profile }: { profile?: string } = {}) => {
+      const rows = profile ? allRows.filter((r) => r.profile === profile) : allRows;
+      return { rows, total: blankTotal() };
+    });
+    vi.mocked(getHealth).mockImplementation(async () => ({ ok: true, version: '0.1.0-test' }));
+    vi.mocked(getDaemonStatus).mockImplementation(async () => ({
+      mode: 'foreground',
+      status: 'running',
+      running: false,
+      version: '0.1.0-test',
+    }));
+    vi.mocked(getHeadroom).mockImplementation(async () => headroom);
+    vi.mocked(getSessions).mockImplementation(async () => sessions);
+    vi.mocked(getHooksStatus).mockImplementation(async () => hooks);
+    vi.mocked(streamUsage).mockImplementation(() => () => {});
+  });
 
   it('shows loading state during the initial dashboard load instead of onboarding empty', async () => {
     let resolveProfiles: (value: ProfileWithTotals[]) => void = () => {};
@@ -228,6 +249,65 @@ describe('<Dashboard>', () => {
     expect(getUsage).toHaveBeenCalledWith({ profile: undefined, since: '7d' });
   });
 
+  it('keeps expensive metadata refreshes out of live usage SSE ticks', async () => {
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    await screen.findByRole('region', { name: /recommended profile/i });
+    const onUsage = vi.mocked(streamUsage).mock.calls[0]?.[0];
+    expect(onUsage).toBeDefined();
+
+    await act(async () => {
+      onUsage?.([]);
+      onUsage?.([]);
+      onUsage?.([]);
+    });
+
+    await waitFor(() => expect(getUsage).toHaveBeenCalledTimes(2));
+    expect(getProfiles).toHaveBeenCalledTimes(2);
+    expect(getDaemonStatus).toHaveBeenCalledOnce();
+    expect(getHeadroom).toHaveBeenCalledOnce();
+    expect(getHooksStatus).toHaveBeenCalledOnce();
+    expect(getSessions).toHaveBeenCalledOnce();
+  });
+
+  it('skips overlapping live usage refreshes while one is in flight', async () => {
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    await screen.findByRole('region', { name: /recommended profile/i });
+    const onUsage = vi.mocked(streamUsage).mock.calls[0]?.[0];
+    expect(onUsage).toBeDefined();
+
+    let resolveLiveUsage: (value: UsageResponse) => void = () => {};
+    vi.mocked(getUsage).mockImplementation(
+      () =>
+        new Promise<UsageResponse>((resolve) => {
+          resolveLiveUsage = resolve;
+        }),
+    );
+    vi.mocked(getProfiles).mockClear();
+    vi.mocked(getUsage).mockClear();
+
+    await act(async () => {
+      onUsage?.([]);
+      onUsage?.([]);
+    });
+
+    expect(getProfiles).toHaveBeenCalledOnce();
+    expect(getUsage).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      resolveLiveUsage({ rows: allRows, total: blankTotal() });
+    });
+  });
+
   it('renders daemon mode, recommendation, telemetry, and hook health', async () => {
     render(
       <ThemeProvider>
@@ -236,8 +316,12 @@ describe('<Dashboard>', () => {
     );
 
     expect(await screen.findByLabelText(/daemon status running/i)).toHaveTextContent('foreground');
-    expect(screen.getByRole('region', { name: /recommended profile/i })).toHaveTextContent('work');
-    expect(screen.getByRole('region', { name: /session telemetry/i })).toHaveTextContent('ccx');
+    expect(await screen.findByRole('region', { name: /recommended profile/i })).toHaveTextContent(
+      'work',
+    );
+    expect(await screen.findByRole('region', { name: /session telemetry/i })).toHaveTextContent(
+      'ccx',
+    );
     expect(screen.getByText(/hooks installed/i)).toBeInTheDocument();
   });
 });
