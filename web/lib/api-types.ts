@@ -406,7 +406,7 @@ export interface operations {
                 profile?: string;
                 /** @description Filter by session status. */
                 status?: string;
-                /** @description Duration string like "24h", "7d", "30d". Default "24h". */
+                /** @description Duration string like "24h", "7d", "30d". Omit for no time filter; default limit/newest-first applies. */
                 since?: string;
                 /** @description Maximum sessions to return. Default 50. */
                 limit?: number;

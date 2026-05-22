@@ -31,7 +31,7 @@ export interface GetUsageParams {
 export interface GetSessionsParams {
   profile?: string;
   status?: string;
-  /** Duration like "24h", "7d", "30d". Default "24h" on the server. */
+  /** Duration like "24h", "7d", "30d". Omit for no time filter; default limit/newest-first applies. */
   since?: string;
   limit?: number;
 }
