@@ -16,10 +16,19 @@ import (
 
 func processAliveOS(pid int) bool {
 	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
+	if err != nil && err != syscall.EPERM {
+		return false
+	}
+	if zombie, ok := processZombieOS(pid); ok && zombie {
+		return false
+	}
+	return true
 }
 
 func processMatchesOS(pid int, expectedExecutable string) bool {
+	if zombie, ok := processZombieOS(pid); ok && zombie {
+		return false
+	}
 	if runtime.GOOS == "linux" {
 		exe, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
 		if err == nil {
@@ -32,6 +41,42 @@ func processMatchesOS(pid int, expectedExecutable string) bool {
 	}
 	got := strings.TrimSpace(string(out))
 	return got != "" && (sameExecutablePath(got, expectedExecutable) || filepath.Base(got) == filepath.Base(expectedExecutable))
+}
+
+func processZombieOS(pid int) (isZombie, known bool) {
+	if runtime.GOOS == "linux" {
+		data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat") //nolint:gosec // pid is an int.
+		if err != nil {
+			return false, false
+		}
+		state := linuxProcStatState(string(data))
+		if state == "" {
+			return false, false
+		}
+		return state == "Z", true
+	}
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output() //nolint:gosec // Command is constant and pid is an int.
+	if err != nil {
+		return false, false
+	}
+	stat := strings.TrimSpace(string(out))
+	if stat == "" {
+		return false, false
+	}
+	return stat[0] == 'Z', true
+}
+
+func linuxProcStatState(stat string) string {
+	endCommand := strings.LastIndex(stat, ")")
+	if endCommand < 0 || endCommand+2 >= len(stat) {
+		return ""
+	}
+	rest := strings.TrimSpace(stat[endCommand+1:])
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 func sameExecutablePath(a, b string) bool {
