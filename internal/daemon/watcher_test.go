@@ -113,6 +113,8 @@ func TestScanWorkerCoalescesRequestsAndRunsOneAtATime(t *testing.T) {
 	eventually(t, func() bool {
 		return stats.totalScans() == 2
 	})
+	// Hold briefly after the coalesced follow-up to catch accidental extra
+	// scans from pending profile requests racing behind the all-profile scan.
 	time.Sleep(50 * time.Millisecond)
 	if got := stats.totalScans(); got != 2 {
 		t.Fatalf("total scans = %d, want exactly active plus one coalesced follow-up", got)
