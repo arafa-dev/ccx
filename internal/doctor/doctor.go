@@ -119,7 +119,8 @@ func (d *Doctor) checkRegisteredProfiles(ctx context.Context) []contracts.Doctor
 		}}
 	}
 	out := make([]contracts.DoctorCheck, 0, len(profiles))
-	for _, p := range profiles {
+	for i := range profiles {
+		p := &profiles[i]
 		status := "ok"
 		detail := p.ConfigDir
 		remediation := ""

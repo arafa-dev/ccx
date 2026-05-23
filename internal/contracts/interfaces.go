@@ -32,6 +32,14 @@ type Store interface {
 	// Usage queries
 	QueryUsage(ctx context.Context, q UsageQuery) ([]UsageRow, error)
 
+	// Hook telemetry and session state
+	InsertHookEvent(ctx context.Context, profileName string, event HookEvent) error
+	UpsertSessionTelemetry(ctx context.Context, profileName string, event HookEvent) error
+	QuerySessions(ctx context.Context, q SessionQuery) ([]SessionTelemetry, error)
+	QueryRecentFailures(ctx context.Context, profileName string, since time.Time) ([]HookEvent, error)
+	SaveProfileHealth(ctx context.Context, health ProfileHealth) error
+	GetProfileHealth(ctx context.Context, profileName string) (ProfileHealth, error)
+
 	// Scan cursors (for incremental scanning)
 	GetCursor(ctx context.Context, profileName, filePath string) (offset int64, inode uint64, err error)
 	SetCursor(ctx context.Context, profileName, filePath string, offset int64, inode uint64) error

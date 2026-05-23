@@ -113,7 +113,8 @@ func ingestAllProfiles(ctx context.Context, deps *Deps) error {
 	if err != nil {
 		return err
 	}
-	for _, p := range profiles {
+	for i := range profiles {
+		p := profiles[i]
 		if err := deps.Store.SaveProfile(ctx, p); err != nil {
 			return fmt.Errorf("saving profile %q before scan: %w", p.Name, err)
 		}

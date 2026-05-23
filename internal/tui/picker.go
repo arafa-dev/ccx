@@ -75,7 +75,8 @@ var (
 
 func (m model) View() string {
 	s := titleStyle.Render("Pick a profile:") + "\n\n"
-	for i, p := range m.profiles {
+	for i := range m.profiles {
+		p := &m.profiles[i]
 		line := fmt.Sprintf("  %-12s %s", p.Name, dimStyle.Render(p.ConfigDir))
 		if i == m.cursor {
 			line = selectedStyle.Render("> " + p.Name + "   " + p.ConfigDir)

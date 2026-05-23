@@ -91,6 +91,80 @@ paths:
               schema:
                 type: string
 
+  /api/daemon/status:
+    get:
+      summary: Daemon runtime status
+      operationId: getDaemonStatus
+      responses:
+        "200":
+          description: Current daemon or foreground dashboard status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaemonStatus"
+
+  /api/hooks/status:
+    get:
+      summary: Hook installation status
+      operationId: getHooksStatus
+      parameters:
+        - in: query
+          name: profile
+          schema: { type: string }
+          description: Filter to one profile. Omit for all.
+      responses:
+        "200":
+          description: Per-profile hook status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HookStatus"
+
+  /api/sessions:
+    get:
+      summary: Recent session telemetry
+      operationId: getSessions
+      parameters:
+        - in: query
+          name: profile
+          schema: { type: string }
+          description: Filter to one profile. Omit for all.
+        - in: query
+          name: status
+          schema: { type: string }
+          description: Filter by session status.
+        - in: query
+          name: since
+          schema: { type: string }
+          description: Duration string like "24h", "7d", "30d". Omit for no time filter; default limit/newest-first applies.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200 }
+          description: Maximum sessions to return. Default 50.
+      responses:
+        "200":
+          description: Recent sessions, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionTelemetry"
+
+  /api/headroom:
+    get:
+      summary: Profile headroom recommendation
+      operationId: getHeadroom
+      responses:
+        "200":
+          description: Recommendation and ranked candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HeadroomResponse"
+
 components:
   schemas:
     Profile:
@@ -140,3 +214,115 @@ components:
       properties:
         usage:          { $ref: "#/components/schemas/Usage" }
         estimated_usd:  { type: number, format: double }
+
+    DaemonStatus:
+      type: object
+      required: [mode, status, version, running]
+      properties:
+        mode:
+          type: string
+          enum: [daemon, foreground, offline]
+        status:
+          type: string
+          enum: [running, offline, starting]
+        pid:              { type: integer }
+        version:          { type: string }
+        started_at:       { type: string, format: date-time }
+        port:             { type: integer }
+        url:              { type: string }
+        db_path:          { type: string }
+        log_path:         { type: string }
+        executable_path:  { type: string }
+        profiles_watched: { type: integer }
+        running:          { type: boolean }
+
+    HookStatus:
+      type: object
+      required: [profile, installed, status, disabled, settings_path]
+      properties:
+        profile:       { type: string }
+        installed:     { type: boolean }
+        status:
+          type: string
+          enum: [missing, invalid, partial, disabled, installed]
+        disabled:      { type: boolean }
+        settings_path: { type: string }
+        backup_path:   { type: string }
+        message:       { type: string }
+        error:         { type: string }
+
+    SessionTelemetry:
+      type: object
+      required:
+        - profile
+        - session
+        - transcript
+        - cwd
+        - model
+        - source
+        - permission
+        - started_at
+        - ended_at
+        - last_seen_at
+        - status
+        - end_reason
+        - failure_error
+        - failure_details
+        - compact_count
+      properties:
+        profile:         { type: string }
+        session:         { type: string }
+        transcript:      { type: string }
+        cwd:             { type: string }
+        model:           { type: string }
+        source:          { type: string }
+        permission:      { type: string }
+        started_at:      { type: string, format: date-time }
+        ended_at:        { type: string, format: date-time }
+        last_seen_at:    { type: string, format: date-time }
+        status:          { type: string }
+        end_reason:      { type: string }
+        failure_error:   { type: string }
+        failure_details: { type: string }
+        compact_count:   { type: integer }
+
+    HeadroomCandidate:
+      type: object
+      required:
+        - profile
+        - available
+        - score
+        - headroom_percent
+        - auth_status
+        - reasons
+        - priority
+        - tokens_24h
+        - tokens_7d
+        - usd_30d
+      properties:
+        profile:          { type: string }
+        available:        { type: boolean }
+        score:            { type: number, format: double }
+        headroom_percent: { type: number, format: double }
+        auth_status:      { type: string }
+        cooldown_until:   { type: string, format: date-time }
+        reasons:
+          type: array
+          items: { type: string }
+        priority:         { type: integer }
+        tokens_24h:       { type: integer }
+        tokens_7d:        { type: integer }
+        usd_30d:          { type: number, format: double }
+
+    HeadroomResponse:
+      type: object
+      required: [candidates]
+      properties:
+        recommendation:
+          $ref: "#/components/schemas/HeadroomCandidate"
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/HeadroomCandidate"
+        error:
+          type: string

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ChevronDown, Circle } from 'lucide-react';
 import { ToggleTheme } from './toggle-theme';
+import type { DaemonStatus } from '@/lib/api';
 import { profileAccent } from '@/lib/profile-color';
 
 export type LiveStatus = 'connected' | 'disconnected' | 'connecting';
@@ -17,11 +18,14 @@ export interface HeaderProps {
   selected: string | null;
   onSelect: (name: string | null) => void;
   live: LiveStatus;
+  daemon?: DaemonStatus | null;
 }
 
-export function Header({ profiles, selected, onSelect, live }: HeaderProps) {
+export function Header({ profiles, selected, onSelect, live, daemon }: HeaderProps) {
   const [open, setOpen] = useState(false);
   const selectedProfile = profiles.find((p) => p.name === selected) ?? null;
+  const daemonText = daemon ? daemon.mode : 'foreground';
+  const daemonState = daemon ? daemon.status : 'running';
 
   return (
     <header className="sticky top-0 z-20 flex items-center justify-between border-b border-card-border bg-background/80 px-6 py-3 backdrop-blur">
@@ -31,6 +35,25 @@ export function Header({ profiles, selected, onSelect, live }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-3">
+        <span
+          aria-label={`Daemon status ${daemonState}`}
+          className="hidden items-center gap-1.5 rounded-md border border-card-border bg-card px-2 py-1 text-xs text-muted sm:inline-flex"
+        >
+          <Circle
+            size={8}
+            fill={
+              daemonState === 'running'
+                ? '#22c55e'
+                : daemonState === 'starting'
+                  ? '#f59e0b'
+                  : '#71717a'
+            }
+            stroke="none"
+          />
+          <span>{daemonText}</span>
+          <span className="text-muted/80">{daemonState}</span>
+        </span>
+
         <div className="relative">
           <button
             type="button"

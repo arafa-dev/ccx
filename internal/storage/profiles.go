@@ -17,14 +17,24 @@ func (s *Store) SaveProfile(ctx context.Context, p contracts.Profile) error { //
 	defer s.writeMu.Unlock()
 
 	const q = `
-INSERT INTO profiles (name, config_dir, label, color, created_at, last_used_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO profiles (
+    name, config_dir, label, color, created_at, last_used_at,
+    daily_token_budget, weekly_token_budget, monthly_usd_budget, priority,
+    suggest_enabled, rate_limit_cooldown
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(name) DO UPDATE SET
-    config_dir   = excluded.config_dir,
-    label        = excluded.label,
-    color        = excluded.color,
-    created_at   = excluded.created_at,
-    last_used_at = excluded.last_used_at
+    config_dir          = excluded.config_dir,
+    label               = excluded.label,
+    color               = excluded.color,
+    created_at          = excluded.created_at,
+    last_used_at        = excluded.last_used_at,
+    daily_token_budget  = excluded.daily_token_budget,
+    weekly_token_budget = excluded.weekly_token_budget,
+    monthly_usd_budget  = excluded.monthly_usd_budget,
+    priority            = excluded.priority,
+    suggest_enabled     = excluded.suggest_enabled,
+    rate_limit_cooldown = excluded.rate_limit_cooldown
 `
 	_, err := s.db.ExecContext(
 		ctx, q,
@@ -34,6 +44,12 @@ ON CONFLICT(name) DO UPDATE SET
 		p.Color,
 		p.CreatedAt.UnixNano(),
 		p.LastUsedAt.UnixNano(),
+		nullableInt(p.Limits.DailyTokenBudget),
+		nullableInt(p.Limits.WeeklyTokenBudget),
+		nullableFloat(p.Limits.MonthlyUSDBudget),
+		nullableInt(p.Limits.Priority),
+		nullableBoolPtr(p.Limits.SuggestEnabled),
+		nullableString(p.Limits.RateLimitCooldown),
 	)
 	if err != nil {
 		return fmt.Errorf("saving profile %q: %w", p.Name, err)
@@ -45,17 +61,44 @@ ON CONFLICT(name) DO UPDATE SET
 // contracts.ErrProfileNotFound (wrapped) if no row exists.
 func (s *Store) GetProfile(ctx context.Context, name string) (contracts.Profile, error) {
 	const q = `
-SELECT name, config_dir, label, color, created_at, last_used_at
+SELECT
+    name,
+    config_dir,
+    label,
+    color,
+    created_at,
+    last_used_at,
+    daily_token_budget,
+    weekly_token_budget,
+    monthly_usd_budget,
+    priority,
+    suggest_enabled,
+    rate_limit_cooldown
 FROM profiles
 WHERE name = ?
 `
 	var (
-		p                 contracts.Profile
-		label, color      sql.NullString
-		createdNs, usedNs int64
+		p                  contracts.Profile
+		label, color       sql.NullString
+		createdNs, usedNs  int64
+		daily, weekly, pri sql.NullInt64
+		monthly            sql.NullFloat64
+		suggest            sql.NullInt64
+		rateLimitCooldown  sql.NullString
 	)
 	err := s.db.QueryRowContext(ctx, q, name).Scan(
-		&p.Name, &p.ConfigDir, &label, &color, &createdNs, &usedNs,
+		&p.Name,
+		&p.ConfigDir,
+		&label,
+		&color,
+		&createdNs,
+		&usedNs,
+		&daily,
+		&weekly,
+		&monthly,
+		&pri,
+		&suggest,
+		&rateLimitCooldown,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return contracts.Profile{}, fmt.Errorf("looking up profile %q: %w", name, contracts.ErrProfileNotFound)
@@ -67,13 +110,26 @@ WHERE name = ?
 	p.Color = color.String
 	p.CreatedAt = time.Unix(0, createdNs).UTC()
 	p.LastUsedAt = time.Unix(0, usedNs).UTC()
+	applyProfileLimits(&p, daily, weekly, monthly, pri, suggest, rateLimitCooldown)
 	return p, nil
 }
 
 // ListProfiles returns every profile, sorted ascending by name.
 func (s *Store) ListProfiles(ctx context.Context) ([]contracts.Profile, error) {
 	const q = `
-SELECT name, config_dir, label, color, created_at, last_used_at
+SELECT
+    name,
+    config_dir,
+    label,
+    color,
+    created_at,
+    last_used_at,
+    daily_token_budget,
+    weekly_token_budget,
+    monthly_usd_budget,
+    priority,
+    suggest_enabled,
+    rate_limit_cooldown
 FROM profiles
 ORDER BY name ASC
 `
@@ -86,17 +142,35 @@ ORDER BY name ASC
 	var out []contracts.Profile
 	for rows.Next() {
 		var (
-			p                 contracts.Profile
-			label, color      sql.NullString
-			createdNs, usedNs int64
+			p                  contracts.Profile
+			label, color       sql.NullString
+			createdNs, usedNs  int64
+			daily, weekly, pri sql.NullInt64
+			monthly            sql.NullFloat64
+			suggest            sql.NullInt64
+			rateLimitCooldown  sql.NullString
 		)
-		if err := rows.Scan(&p.Name, &p.ConfigDir, &label, &color, &createdNs, &usedNs); err != nil {
+		if err := rows.Scan(
+			&p.Name,
+			&p.ConfigDir,
+			&label,
+			&color,
+			&createdNs,
+			&usedNs,
+			&daily,
+			&weekly,
+			&monthly,
+			&pri,
+			&suggest,
+			&rateLimitCooldown,
+		); err != nil {
 			return nil, fmt.Errorf("scanning profile row: %w", err)
 		}
 		p.Label = label.String
 		p.Color = color.String
 		p.CreatedAt = time.Unix(0, createdNs).UTC()
 		p.LastUsedAt = time.Unix(0, usedNs).UTC()
+		applyProfileLimits(&p, daily, weekly, monthly, pri, suggest, rateLimitCooldown)
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -124,4 +198,65 @@ func (s *Store) DeleteProfile(ctx context.Context, name string) error {
 		return fmt.Errorf("deleting profile %q: %w", name, contracts.ErrProfileNotFound)
 	}
 	return nil
+}
+
+func applyProfileLimits(
+	p *contracts.Profile,
+	daily sql.NullInt64,
+	weekly sql.NullInt64,
+	monthly sql.NullFloat64,
+	priority sql.NullInt64,
+	suggest sql.NullInt64,
+	rateLimitCooldown sql.NullString,
+) {
+	if daily.Valid {
+		p.Limits.DailyTokenBudget = int(daily.Int64)
+	}
+	if weekly.Valid {
+		p.Limits.WeeklyTokenBudget = int(weekly.Int64)
+	}
+	if monthly.Valid {
+		p.Limits.MonthlyUSDBudget = monthly.Float64
+	}
+	if priority.Valid {
+		p.Limits.Priority = int(priority.Int64)
+	}
+	if suggest.Valid {
+		enabled := suggest.Int64 != 0
+		p.Limits.SuggestEnabled = &enabled
+	}
+	if rateLimitCooldown.Valid {
+		p.Limits.RateLimitCooldown = rateLimitCooldown.String
+	}
+}
+
+func nullableInt(v int) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+
+func nullableFloat(v float64) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+
+func nullableString(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+func nullableBoolPtr(v *bool) any {
+	if v == nil {
+		return nil
+	}
+	if *v {
+		return 1
+	}
+	return 0
 }

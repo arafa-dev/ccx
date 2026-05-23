@@ -7,22 +7,45 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/arafa-dev/ccx/internal/contracts"
+	"github.com/arafa-dev/ccx/internal/daemon"
 	"github.com/arafa-dev/ccx/internal/dashboard"
+	"github.com/arafa-dev/ccx/internal/headroom"
+	"github.com/arafa-dev/ccx/internal/hooks"
 	"github.com/arafa-dev/ccx/internal/server"
 	"github.com/spf13/cobra"
 )
 
 func newDashboardCommand(opts *Options) *cobra.Command {
 	var (
-		port   int
-		noOpen bool
+		port       int
+		noOpen     bool
+		daemonMode bool
 	)
 	cmd := &cobra.Command{
 		Use:   "dashboard",
 		Short: "Open the local dashboard",
 		RunE: func(c *cobra.Command, _ []string) error {
-			if port != 0 && (port < 1 || port > 65535) {
-				return fmt.Errorf("invalid --port %d: must be in range 1-65535", port)
+			if err := validatePort(port); err != nil {
+				return err
+			}
+
+			ctrl := daemonController(opts)
+			status, err := ctrl.Status(c.Context())
+			if err != nil {
+				return err
+			}
+			if status.Running && status.URL != "" {
+				openOrPrintDashboard(c, opts, status.URL, noOpen)
+				return nil
+			}
+			if daemonMode {
+				result, err := ctrl.StartDetached(c.Context(), daemon.StartOptions{Port: port})
+				if err != nil {
+					return err
+				}
+				openOrPrintDashboard(c, opts, result.Status.URL, noOpen)
+				return nil
 			}
 
 			ctx := c.Context()
@@ -46,6 +69,9 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 				Pricing:  deps.Pricing,
 				Profiles: deps.Profiles,
 				WebRoot:  webFS,
+				Hooks:    &hooks.Service{Profiles: deps.Profiles},
+				Headroom: headroom.Evaluator{Store: deps.Store, Pricing: deps.Pricing},
+				Ingestor: dashboardHeadroomIngestor{deps: deps},
 			}, opts.Build.Version)
 
 			startPort := 7777
@@ -66,7 +92,7 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 			if !noOpen {
 				go func() {
 					time.Sleep(300 * time.Millisecond)
-					_ = openBrowser(url)
+					_ = browserOpener(opts)(url)
 				}()
 			}
 			return runFn()
@@ -74,7 +100,32 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&port, "port", 0, "port (default: pick next free in 7777-7787)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open a browser")
+	cmd.Flags().BoolVar(&daemonMode, "daemon", false, "start or use the background daemon")
 	return cmd
+}
+
+type dashboardHeadroomIngestor struct {
+	deps *Deps
+}
+
+func (i dashboardHeadroomIngestor) IngestHeadroomProfiles(ctx context.Context, profiles []contracts.Profile) (map[string]string, error) {
+	return ingestSuggestProfiles(ctx, i.deps, profiles)
+}
+
+func openOrPrintDashboard(c *cobra.Command, opts *Options, url string, noOpen bool) {
+	_, _ = fmt.Fprintf(c.OutOrStdout(), "ccx dashboard at %s\n", url)
+	if !noOpen {
+		if err := browserOpener(opts)(url); err != nil {
+			_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: failed to open browser: %v\n", err)
+		}
+	}
+}
+
+func browserOpener(opts *Options) func(string) error {
+	if opts.OpenBrowser != nil {
+		return opts.OpenBrowser
+	}
+	return openBrowser
 }
 
 func openBrowser(url string) error {

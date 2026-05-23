@@ -1,28 +1,29 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { UsageRow } from '@/lib/api';
+import type { SessionTelemetry } from '@/lib/api';
 import { profileAccent } from '@/lib/profile-color';
 
 export interface RecentSessionsProps {
-  usageRows: UsageRow[];
+  sessions: SessionTelemetry[];
   profiles: { name: string; color?: string }[];
   limit?: number;
 }
 
-const usd = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
+const timeFmt = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
 });
-const dayFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
 
-export function RecentSessions({ usageRows, profiles, limit = 20 }: RecentSessionsProps) {
-  const sessions = useMemo(() => {
-    const sorted = [...usageRows].sort((a, b) => b.day.localeCompare(a.day));
+export function RecentSessions({ sessions, profiles, limit = 20 }: RecentSessionsProps) {
+  const visibleSessions = useMemo(() => {
+    const sorted = [...sessions].sort((a, b) => b.last_seen_at.localeCompare(a.last_seen_at));
     return sorted.slice(0, limit);
-  }, [usageRows, limit]);
+  }, [sessions, limit]);
 
-  if (sessions.length === 0) {
+  if (visibleSessions.length === 0) {
     return (
       <section className="rounded-xl border border-card-border bg-card p-6 text-center text-sm text-muted">
         No sessions yet. Run <code className="font-mono">claude</code> to start
@@ -33,32 +34,46 @@ export function RecentSessions({ usageRows, profiles, limit = 20 }: RecentSessio
 
   return (
     <section
-      aria-label="Recent sessions"
+      aria-label="Session telemetry"
       className="rounded-xl border border-card-border bg-card p-4"
     >
-      <h2 className="mb-3 text-sm font-medium">Recent sessions</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-medium">Session telemetry</h2>
+        <span className="font-mono text-xs tabular text-muted">
+          {visibleSessions.length} recent
+        </span>
+      </div>
       <ul className="divide-y divide-card-border">
-        {sessions.map((s, i) => {
+        {visibleSessions.map((s) => {
           const meta = profiles.find((p) => p.name === s.profile) ?? { name: s.profile };
+          const duration = durationLabel(s);
           return (
             <li
-              key={`${s.profile}-${s.project}-${s.day}-${i}`}
+              key={`${s.profile}-${s.session}`}
               data-testid="session-row"
-              className="flex items-center justify-between py-2"
+              className="grid grid-cols-[1fr_auto] gap-3 py-2"
             >
-              <div className="flex items-center gap-3">
-                <span
-                  aria-hidden
-                  className="h-2 w-2 rounded-full"
-                  style={{ background: profileAccent(meta) }}
-                />
-                <span className="text-sm font-medium">{s.project ?? '-'}</span>
-                <span className="text-xs text-muted">{s.profile}</span>
-                {s.model && <span className="text-xs text-muted">{s.model}</span>}
+              <div className="min-w-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: profileAccent(meta) }}
+                  />
+                  <span className="truncate text-sm font-medium">{projectLabel(s.cwd)}</span>
+                  <span className="text-xs text-muted">{s.profile}</span>
+                  {s.model && <span className="text-xs text-muted">{s.model}</span>}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+                  <span>{s.status}</span>
+                  {duration && <span>{duration}</span>}
+                  {s.end_reason && <span>{s.end_reason}</span>}
+                  {s.failure_error && <span>{s.failure_error}</span>}
+                  {s.compact_count > 0 && <span>{s.compact_count} compact</span>}
+                </div>
               </div>
-              <div className="flex items-center gap-4 font-mono text-xs tabular">
-                <span className="text-muted">{dayFmt.format(new Date(s.day))}</span>
-                <span>{usd.format(s.estimated_usd)}</span>
+              <div className="whitespace-nowrap font-mono text-xs tabular text-muted">
+                {formatLastSeen(s.last_seen_at)}
               </div>
             </li>
           );
@@ -66,4 +81,30 @@ export function RecentSessions({ usageRows, profiles, limit = 20 }: RecentSessio
       </ul>
     </section>
   );
+}
+
+function projectLabel(cwd: string): string {
+  const parts = cwd.split(/[\\/]+/).filter(Boolean);
+  return parts.at(-1) ?? (cwd || '-');
+}
+
+function formatLastSeen(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return '-';
+  }
+  return timeFmt.format(date);
+}
+
+function durationLabel(session: SessionTelemetry): string | null {
+  const start = Date.parse(session.started_at);
+  const end = Date.parse(session.ended_at);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return null;
+  }
+  const minutes = Math.round((end - start) / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }

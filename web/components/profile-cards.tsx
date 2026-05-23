@@ -2,14 +2,21 @@
 
 import { useMemo } from 'react';
 import { ProfileCard } from './profile-card';
-import type { ProfileWithTotals, UsageRow } from '@/lib/api';
+import type { HeadroomCandidate, HookStatus, ProfileWithTotals, UsageRow } from '@/lib/api';
 
 export interface ProfileCardsProps {
   profiles: ProfileWithTotals[];
   usageRows: UsageRow[];
+  candidates?: HeadroomCandidate[];
+  hookStatuses?: HookStatus[];
 }
 
-export function ProfileCards({ profiles, usageRows }: ProfileCardsProps) {
+export function ProfileCards({
+  profiles,
+  usageRows,
+  candidates = [],
+  hookStatuses = [],
+}: ProfileCardsProps) {
   const sparklinesByProfile = useMemo(() => {
     const byProfile = new Map<string, Map<string, number>>();
     for (const row of usageRows) {
@@ -33,6 +40,15 @@ export function ProfileCards({ profiles, usageRows }: ProfileCardsProps) {
     return out;
   }, [usageRows]);
 
+  const candidatesByProfile = useMemo(
+    () => new Map(candidates.map((candidate) => [candidate.profile, candidate])),
+    [candidates],
+  );
+  const hooksByProfile = useMemo(
+    () => new Map(hookStatuses.map((status) => [status.profile, status])),
+    [hookStatuses],
+  );
+
   if (profiles.length === 0) return null;
 
   return (
@@ -45,6 +61,8 @@ export function ProfileCards({ profiles, usageRows }: ProfileCardsProps) {
           key={p.name}
           profile={p}
           sparkline={sparklinesByProfile.get(p.name) ?? []}
+          candidate={candidatesByProfile.get(p.name)}
+          hookStatus={hooksByProfile.get(p.name)}
         />
       ))}
     </section>

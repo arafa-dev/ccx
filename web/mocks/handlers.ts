@@ -1,5 +1,13 @@
 import { http, HttpResponse } from 'msw';
-import { FIXTURE_PROFILES, aggregateTotal, generateUsageRows } from './fixtures';
+import {
+  FIXTURE_DAEMON_STATUS,
+  FIXTURE_HEADROOM,
+  FIXTURE_HOOK_STATUS,
+  FIXTURE_PROFILES,
+  aggregateTotal,
+  generateSessions,
+  generateUsageRows,
+} from './fixtures';
 
 const configuredBase = process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, '');
 const apiRoute = (path: string) => (configuredBase ? `${configuredBase}${path}` : `*${path}`);
@@ -36,4 +44,27 @@ export const handlers = [
       },
     });
   }),
+
+  http.get(apiRoute('/api/daemon/status'), () =>
+    HttpResponse.json(FIXTURE_DAEMON_STATUS),
+  ),
+
+  http.get(apiRoute('/api/hooks/status'), ({ request }) => {
+    const url = new URL(request.url);
+    const profile = url.searchParams.get('profile');
+    const rows = profile
+      ? FIXTURE_HOOK_STATUS.filter((row) => row.profile === profile)
+      : FIXTURE_HOOK_STATUS;
+    return HttpResponse.json(rows);
+  }),
+
+  http.get(apiRoute('/api/sessions'), ({ request }) => {
+    const url = new URL(request.url);
+    const profile = url.searchParams.get('profile') ?? undefined;
+    const status = url.searchParams.get('status');
+    const rows = generateSessions(profile).filter((row) => !status || row.status === status);
+    return HttpResponse.json(rows);
+  }),
+
+  http.get(apiRoute('/api/headroom'), () => HttpResponse.json(FIXTURE_HEADROOM)),
 ];

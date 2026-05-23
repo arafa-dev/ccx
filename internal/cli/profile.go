@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -19,11 +21,100 @@ func newProfileCommand(_ *Options) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newProfileAddCmd(),
+		newProfileSetCmd(),
 		newProfileListCmd(),
 		newProfileRmCmd(),
 		newProfileCurrentCmd(),
 	)
 	return cmd
+}
+
+func newProfileSetCmd() *cobra.Command {
+	var (
+		label, color, suggestions, rateLimitCooldown string
+		dailyTokens, weeklyTokens, priority          int
+		monthlyUSD                                   float64
+		asJSON                                       bool
+	)
+	cmd := &cobra.Command{
+		Use:   "set <name>",
+		Short: "Update profile limits and suggestion settings",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			ctx := c.Context()
+			deps, err := buildDeps(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = deps.Close() }()
+
+			name := args[0]
+			flags := c.Flags()
+			if err := deps.Profiles.Update(ctx, name, func(p *contracts.Profile) error {
+				if flags.Changed("label") {
+					p.Label = label
+				}
+				if flags.Changed("color") {
+					p.Color = color
+				}
+				if flags.Changed("daily-tokens") {
+					p.Limits.DailyTokenBudget = dailyTokens
+				}
+				if flags.Changed("weekly-tokens") {
+					p.Limits.WeeklyTokenBudget = weeklyTokens
+				}
+				if flags.Changed("monthly-usd") {
+					p.Limits.MonthlyUSDBudget = monthlyUSD
+				}
+				if flags.Changed("priority") {
+					p.Limits.Priority = priority
+				}
+				if flags.Changed("rate-limit-cooldown") {
+					p.Limits.RateLimitCooldown = rateLimitCooldown
+				}
+				if flags.Changed("suggestions") {
+					enabled, err := parseSuggestionState(suggestions)
+					if err != nil {
+						return err
+					}
+					p.Limits.SuggestEnabled = &enabled
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+
+			if asJSON {
+				return json.NewEncoder(c.OutOrStdout()).Encode(map[string]string{
+					"profile": name,
+					"status":  "updated",
+				})
+			}
+			_, _ = fmt.Fprintf(c.OutOrStdout(), "Profile '%s' updated.\n", name)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&label, "label", "", "human-readable label; pass an empty value to clear")
+	cmd.Flags().StringVar(&color, "color", "", "hex accent color; pass an empty value to clear")
+	cmd.Flags().IntVar(&dailyTokens, "daily-tokens", 0, "daily token budget; 0 clears the limit")
+	cmd.Flags().IntVar(&weeklyTokens, "weekly-tokens", 0, "weekly token budget; 0 clears the limit")
+	cmd.Flags().Float64Var(&monthlyUSD, "monthly-usd", 0, "monthly USD budget; 0 clears the limit")
+	cmd.Flags().IntVar(&priority, "priority", 0, "suggestion priority")
+	cmd.Flags().StringVar(&suggestions, "suggestions", "", "suggestion eligibility: enabled or disabled")
+	cmd.Flags().StringVar(&rateLimitCooldown, "rate-limit-cooldown", "", "rate-limit cooldown duration; pass an empty value to clear")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON output")
+	return cmd
+}
+
+func parseSuggestionState(value string) (bool, error) {
+	switch strings.ToLower(value) {
+	case "enabled":
+		return true, nil
+	case "disabled":
+		return false, nil
+	default:
+		return false, fmt.Errorf("--suggestions must be enabled or disabled")
+	}
 }
 
 func newProfileAddCmd() *cobra.Command {
@@ -91,7 +182,8 @@ func newProfileListCmd() *cobra.Command {
 			}
 			w := tabwriter.NewWriter(c.OutOrStdout(), 0, 0, 2, ' ', 0)
 			_, _ = fmt.Fprintln(w, "NAME\tCONFIG_DIR\tLAST USED\tTODAY ($)")
-			for _, p := range profiles {
+			for i := range profiles {
+				p := &profiles[i]
 				marker := " "
 				if okActive && p.Name == active.Name {
 					marker = "*"

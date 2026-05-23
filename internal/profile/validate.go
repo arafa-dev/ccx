@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
 )
@@ -27,6 +28,20 @@ func ValidateProfile(p contracts.Profile) error { //nolint:gocritic // Profile i
 	}
 	if !filepath.IsAbs(p.ConfigDir) {
 		return fmt.Errorf("config_dir %q is not absolute: %w", p.ConfigDir, contracts.ErrInvalidConfigDir)
+	}
+	if p.Limits.DailyTokenBudget < 0 {
+		return fmt.Errorf("profile %q daily_token_budget must be non-negative", p.Name)
+	}
+	if p.Limits.WeeklyTokenBudget < 0 {
+		return fmt.Errorf("profile %q weekly_token_budget must be non-negative", p.Name)
+	}
+	if p.Limits.MonthlyUSDBudget < 0 {
+		return fmt.Errorf("profile %q monthly_usd_budget must be non-negative", p.Name)
+	}
+	if p.Limits.RateLimitCooldown != "" {
+		if _, err := time.ParseDuration(p.Limits.RateLimitCooldown); err != nil {
+			return fmt.Errorf("profile %q rate_limit_cooldown %q is invalid: %w", p.Name, p.Limits.RateLimitCooldown, err)
+		}
 	}
 	return nil
 }

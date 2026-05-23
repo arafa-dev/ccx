@@ -38,6 +38,58 @@ ccx tries ports 7777–7787 in order. If all are taken (unlikely):
 ccx dashboard --port 8888
 ```
 
+If you want the dashboard to keep updating without a foreground terminal, run it
+through the daemon:
+
+```bash
+ccx daemon start
+ccx dashboard --daemon
+```
+
+## `ccx daemon status` says not running or shows a stale pid
+
+Start with the structured status and logs:
+
+```bash
+ccx daemon status --json
+ccx daemon logs
+```
+
+By default the daemon runtime files are in `~/.ccx/`: `daemon.pid`,
+`daemon.json`, `daemon.log`, and `daemon.lock`. A stale pid means ccx found old
+runtime state but the recorded process is no longer a matching live daemon.
+Usually this is enough:
+
+```bash
+ccx daemon stop
+ccx daemon start
+```
+
+If startup fails before the log is written, run it in the foreground to see the
+error directly:
+
+```bash
+ccx daemon start --foreground
+```
+
+## `ccx hooks status` reports disabled, partial, or invalid
+
+Check all profiles or one profile:
+
+```bash
+ccx hooks status
+ccx hooks status --profile work --json
+```
+
+`disabled` means that profile's Claude Code `settings.json` has
+`disableAllHooks: true`; ccx will not override that switch. `partial` means the
+settings file is valid but one or more ccx-managed hook entries are missing; run
+`ccx hooks install --profile work` to add them. `invalid` means ccx could not
+parse the settings safely, so fix the JSON first and rerun install.
+
+When ccx changes an existing settings file, it writes a
+`settings.json.ccx-backup-*` file next to it before publishing the update.
+
 ## PowerShell blocks `ccx init pwsh`
 
 Windows may block profile scripts on default PowerShell execution-policy settings. If `ccx init pwsh` output is
@@ -58,7 +110,32 @@ Check:
 3. Look at `~/.ccx/state.db` — is it being written? `ls -la ~/.ccx/`
 4. Look at the JSONL source — `ls -la $CLAUDE_CONFIG_DIR/projects/`
 
-If all of those look fine, run `ccx usage --verbose` and file an issue with the output.
+If all of those look fine, run `ccx usage --json` and file an issue with the output.
+
+## `ccx suggest` returns no recommendation
+
+Use JSON output to inspect every candidate and its reasons:
+
+```bash
+ccx suggest --json
+```
+
+Common reasons:
+
+- Suggestions were disabled for the profile. Re-enable with
+  `ccx profile set <name> --suggestions enabled`.
+- The profile config dir is missing or unreadable. Check `ccx doctor` and the
+  `config_dir` in `~/.ccx/profiles.toml`.
+- A hook `StopFailure` in the 30-day lookback recorded `rate_limit`. The
+  profile stays unavailable until its cooldown expires; the default is 5 hours.
+  Override per profile with `ccx profile set <name> --rate-limit-cooldown 2h`.
+- A hook `StopFailure` in the 30-day lookback recorded
+  `authentication_failed` or `oauth_org_not_allowed`. ccx treats that profile
+  as unavailable instead of recommending a likely-broken account; re-authenticate
+  with `eval "$(ccx use <name>)"` and `claude /login` before using it manually.
+
+`ccx suggest` is advisory: it prints a suggested `ccx use <name>` command but
+does not switch accounts automatically.
 
 ## Cost numbers look wrong
 

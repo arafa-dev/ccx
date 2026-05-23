@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -67,5 +68,44 @@ func TestDecodeRegistryEmptyBytes(t *testing.T) {
 	}
 	if len(out.Profiles) != 0 {
 		t.Errorf("empty input should yield 0 profiles, got %d", len(out.Profiles))
+	}
+}
+
+func TestRegistryRoundTripsProfileLimits(t *testing.T) {
+	suggest := false
+	in := registry{
+		Profiles: []contracts.Profile{
+			{
+				Name:      "work",
+				ConfigDir: "/home/u/.claude-profiles/work",
+				Limits: contracts.ProfileLimits{
+					DailyTokenBudget:  100000,
+					WeeklyTokenBudget: 500000,
+					MonthlyUSDBudget:  250.75,
+					Priority:          -5,
+					SuggestEnabled:    &suggest,
+					RateLimitCooldown: "1h30m",
+				},
+			},
+		},
+	}
+
+	data, err := encodeRegistry(in)
+	if err != nil {
+		t.Fatalf("encodeRegistry: %v", err)
+	}
+
+	out, err := decodeRegistry(data)
+	if err != nil {
+		t.Fatalf("decodeRegistry: %v", err)
+	}
+	if !reflect.DeepEqual(out, in) {
+		t.Errorf("registry limits roundtrip mismatch:\n got  %+v\n want %+v\nTOML:\n%s", out, in, data)
+	}
+	if out.Profiles[0].Limits.SuggestEnabled == nil {
+		t.Fatalf("SuggestEnabled pointer was not preserved")
+	}
+	if *out.Profiles[0].Limits.SuggestEnabled {
+		t.Fatalf("SuggestEnabled = true, want false")
 	}
 }

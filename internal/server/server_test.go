@@ -175,16 +175,55 @@ func TestUsageEndpointRejectsNonPositiveSince(t *testing.T) {
 
 type mockStore struct {
 	contracts.Store
-	queryRows []contracts.UsageRow
-	queryErr  error
+	queryRows        []contracts.UsageRow
+	queryErr         error
+	sessions         []contracts.SessionTelemetry
+	nilSessions      bool
+	lastSessionQuery contracts.SessionQuery
+	usageByProfile   map[string][]contracts.UsageRow
 }
 
 func (m *mockStore) ListProfiles(_ context.Context) ([]contracts.Profile, error) {
 	return []contracts.Profile{{Name: "demo", ConfigDir: "/tmp/demo"}}, nil
 }
 
-func (m *mockStore) QueryUsage(_ context.Context, _ contracts.UsageQuery) ([]contracts.UsageRow, error) {
+func (m *mockStore) QueryUsage(_ context.Context, q contracts.UsageQuery) ([]contracts.UsageRow, error) {
+	if m.usageByProfile != nil {
+		return append([]contracts.UsageRow(nil), m.usageByProfile[q.Profile]...), m.queryErr
+	}
 	return m.queryRows, m.queryErr
+}
+
+func (m *mockStore) QuerySessions(_ context.Context, q contracts.SessionQuery) ([]contracts.SessionTelemetry, error) {
+	m.lastSessionQuery = q
+	if m.nilSessions {
+		return nil, nil
+	}
+	out := make([]contracts.SessionTelemetry, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		if q.Profile != "" && session.Profile != q.Profile {
+			continue
+		}
+		if q.Status != "" && session.Status != q.Status {
+			continue
+		}
+		if !q.Since.IsZero() && session.LastSeenAt.Before(q.Since) {
+			continue
+		}
+		out = append(out, session)
+	}
+	if q.Limit > 0 && len(out) > q.Limit {
+		out = out[:q.Limit]
+	}
+	return out, nil
+}
+
+func (m *mockStore) QueryRecentFailures(context.Context, string, time.Time) ([]contracts.HookEvent, error) {
+	return nil, nil
+}
+
+func (m *mockStore) GetProfileHealth(context.Context, string) (contracts.ProfileHealth, error) {
+	return contracts.ProfileHealth{}, contracts.ErrProfileNotFound
 }
 
 type mockPricing struct {

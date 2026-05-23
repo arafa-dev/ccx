@@ -10,12 +10,103 @@ import "time"
 // ConfigDir field is the only thing that determines identity — setting
 // CLAUDE_CONFIG_DIR to this value is what isolates the account.
 type Profile struct {
-	Name       string    `json:"name"        toml:"name"`
-	ConfigDir  string    `json:"config_dir"  toml:"config_dir"`
-	Label      string    `json:"label"       toml:"label,omitempty"`
-	Color      string    `json:"color"       toml:"color,omitempty"`
-	CreatedAt  time.Time `json:"created_at"  toml:"created_at"`
-	LastUsedAt time.Time `json:"last_used_at" toml:"last_used_at"`
+	Name       string        `json:"name"         toml:"name"`
+	ConfigDir  string        `json:"config_dir"   toml:"config_dir"`
+	Label      string        `json:"label"        toml:"label,omitempty"`
+	Color      string        `json:"color"        toml:"color,omitempty"`
+	CreatedAt  time.Time     `json:"created_at"   toml:"created_at"`
+	LastUsedAt time.Time     `json:"last_used_at"  toml:"last_used_at"`
+	Limits     ProfileLimits `json:"limits"       toml:"limits,omitempty"`
+}
+
+// ProfileLimits configures optional per-profile budget and headroom behavior.
+// Zero values mean no explicit limit is configured.
+type ProfileLimits struct {
+	DailyTokenBudget  int     `json:"daily_token_budget"  toml:"daily_token_budget,omitempty"`
+	WeeklyTokenBudget int     `json:"weekly_token_budget" toml:"weekly_token_budget,omitempty"`
+	MonthlyUSDBudget  float64 `json:"monthly_usd_budget"  toml:"monthly_usd_budget,omitempty"`
+	Priority          int     `json:"priority"            toml:"priority,omitempty"`
+	SuggestEnabled    *bool   `json:"suggest_enabled"     toml:"suggest_enabled,omitempty"`
+	RateLimitCooldown string  `json:"rate_limit_cooldown" toml:"rate_limit_cooldown,omitempty"`
+}
+
+// DaemonStatus is the daemon's externally visible runtime state.
+type DaemonStatus struct {
+	PID             int       `json:"pid"`
+	Version         string    `json:"version"`
+	StartedAt       time.Time `json:"started_at"`
+	Port            int       `json:"port"`
+	URL             string    `json:"url"`
+	DBPath          string    `json:"db_path"`
+	LogPath         string    `json:"log_path"`
+	ExecutablePath  string    `json:"executable_path,omitempty"`
+	StartToken      string    `json:"start_token,omitempty"`
+	ProcessIdentity string    `json:"process_identity,omitempty"`
+	ProfilesWatched int       `json:"profiles_watched"`
+	Running         bool      `json:"running"`
+}
+
+// HookEvent captures one daemon-facing hook event emitted by Claude Code.
+type HookEvent struct {
+	Profile      string    `json:"profile"`
+	Session      string    `json:"session"`
+	Event        string    `json:"event"`
+	Timestamp    time.Time `json:"timestamp"`
+	Transcript   string    `json:"transcript"`
+	CWD          string    `json:"cwd"`
+	Model        string    `json:"model"`
+	Source       string    `json:"source"`
+	Permission   string    `json:"permission"`
+	Reason       string    `json:"reason"`
+	Error        string    `json:"error"`
+	ErrorDetails string    `json:"error_details"`
+	Trigger      string    `json:"trigger"`
+}
+
+// SessionTelemetry is the current aggregate state for one Claude Code session.
+type SessionTelemetry struct {
+	Profile        string    `json:"profile"`
+	Session        string    `json:"session"`
+	Transcript     string    `json:"transcript"`
+	CWD            string    `json:"cwd"`
+	Model          string    `json:"model"`
+	Source         string    `json:"source"`
+	Permission     string    `json:"permission"`
+	StartedAt      time.Time `json:"started_at"`
+	EndedAt        time.Time `json:"ended_at"`
+	LastSeenAt     time.Time `json:"last_seen_at"`
+	Status         string    `json:"status"`
+	EndReason      string    `json:"end_reason"`
+	FailureError   string    `json:"failure_error"`
+	FailureDetails string    `json:"failure_details"`
+	CompactCount   int       `json:"compact_count"`
+}
+
+// ProfileHealth records the latest authentication health check for a profile.
+type ProfileHealth struct {
+	Profile    string    `json:"profile"`
+	CheckedAt  time.Time `json:"checked_at"`
+	AuthStatus string    `json:"auth_status"`
+	AuthDetail string    `json:"auth_detail"`
+}
+
+// HeadroomRecommendation is an advisory ranking for profile selection.
+type HeadroomRecommendation struct {
+	Profile         string    `json:"profile"`
+	Score           float64   `json:"score"`
+	HeadroomPercent float64   `json:"headroom_percent"`
+	Available       bool      `json:"available"`
+	Reason          string    `json:"reason"`
+	CooldownUntil   time.Time `json:"cooldown_until"`
+	AuthStatus      string    `json:"auth_status"`
+}
+
+// SessionQuery filters session telemetry rows.
+type SessionQuery struct {
+	Profile string    `json:"profile"`
+	Status  string    `json:"status"`
+	Since   time.Time `json:"since"`
+	Limit   int       `json:"limit"`
 }
 
 // Usage holds the token counts for a single Claude Code event. All fields are

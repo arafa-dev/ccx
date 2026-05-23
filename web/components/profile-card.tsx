@@ -1,12 +1,15 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { Line, LineChart, ResponsiveContainer } from 'recharts';
-import type { ProfileWithTotals } from '@/lib/api';
+import type { HeadroomCandidate, HookStatus, ProfileWithTotals } from '@/lib/api';
 import { profileAccent } from '@/lib/profile-color';
 
 export interface ProfileCardProps {
   profile: ProfileWithTotals;
   sparkline: { day: string; tokens: number }[];
+  candidate?: HeadroomCandidate;
+  hookStatus?: HookStatus;
 }
 
 const compact = new Intl.NumberFormat('en-US', {
@@ -18,7 +21,7 @@ const usd = new Intl.NumberFormat('en-US', {
   currency: 'USD',
 });
 
-export function ProfileCard({ profile, sparkline }: ProfileCardProps) {
+export function ProfileCard({ profile, sparkline, candidate, hookStatus }: ProfileCardProps) {
   const accent = profileAccent(profile);
   const totalTokens =
     profile.today.usage.input_tokens +
@@ -42,6 +45,27 @@ export function ProfileCard({ profile, sparkline }: ProfileCardProps) {
         </div>
         {profile.label && <span className="text-xs text-muted">{profile.label}</span>}
       </div>
+
+      {(candidate || hookStatus) && (
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          {candidate && (
+            <>
+              <StatusPill tone={candidate.available ? 'ok' : 'warn'}>
+                {candidate.available ? 'available' : 'unavailable'}
+              </StatusPill>
+              <StatusPill tone={candidate.auth_status === 'ok' ? 'ok' : 'warn'}>
+                auth {candidate.auth_status}
+              </StatusPill>
+              {candidate.cooldown_until && <StatusPill tone="warn">cooldown</StatusPill>}
+            </>
+          )}
+          {hookStatus && (
+            <StatusPill tone={hookStatus.installed && !hookStatus.disabled ? 'ok' : 'warn'}>
+              hooks {hookStatus.status}
+            </StatusPill>
+          )}
+        </div>
+      )}
 
       <div className="flex items-baseline justify-between">
         <span className="font-mono text-2xl tabular tracking-tight">
@@ -67,5 +91,25 @@ export function ProfileCard({ profile, sparkline }: ProfileCardProps) {
         </ResponsiveContainer>
       </div>
     </div>
+  );
+}
+
+function StatusPill({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  tone: 'ok' | 'warn';
+}) {
+  return (
+    <span
+      className={
+        tone === 'ok'
+          ? 'rounded-md bg-emerald-500/10 px-2 py-0.5 text-emerald-600 dark:text-emerald-300'
+          : 'rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-300'
+      }
+    >
+      {children}
+    </span>
   );
 }

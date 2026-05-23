@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ProfileCards } from './profile-cards';
-import type { ProfileWithTotals, UsageRow } from '@/lib/api';
+import type { HeadroomCandidate, ProfileWithTotals, UsageRow } from '@/lib/api';
 
 const profiles: ProfileWithTotals[] = [
   {
@@ -37,6 +37,22 @@ const rows: UsageRow[] = Array.from({ length: 7 }, (_, i) => ({
   estimated_usd: 0.5 * (i + 1),
 }));
 
+const candidates: HeadroomCandidate[] = [
+  {
+    profile: 'work',
+    available: false,
+    score: 42,
+    headroom_percent: 12.5,
+    auth_status: 'fail',
+    cooldown_until: '2026-05-19T13:00:00Z',
+    reasons: ['rate limit cooldown active'],
+    priority: 0,
+    tokens_24h: 90000,
+    tokens_7d: 500000,
+    usd_30d: 40,
+  },
+];
+
 describe('<ProfileCards>', () => {
   it('renders one card per profile', () => {
     render(<ProfileCards profiles={profiles} usageRows={rows} />);
@@ -52,5 +68,12 @@ describe('<ProfileCards>', () => {
   it('formats total tokens in compact notation', () => {
     render(<ProfileCards profiles={profiles} usageRows={rows} />);
     expect(screen.getByText(/5\.2[0-9]M/)).toBeInTheDocument();
+  });
+
+  it('shows availability, cooldown, and auth health from headroom candidates', () => {
+    render(<ProfileCards profiles={profiles} usageRows={rows} candidates={candidates} />);
+    expect(screen.getByText(/unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/cooldown/i)).toBeInTheDocument();
+    expect(screen.getByText(/auth fail/i)).toBeInTheDocument();
   });
 });
