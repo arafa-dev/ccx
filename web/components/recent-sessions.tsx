@@ -73,7 +73,7 @@ export function RecentSessions({ sessions, profiles, limit = 20 }: RecentSession
                 </div>
               </div>
               <div className="whitespace-nowrap font-mono text-xs tabular text-muted">
-                {timeFmt.format(new Date(s.last_seen_at))}
+                {formatLastSeen(s.last_seen_at)}
               </div>
             </li>
           );
@@ -84,8 +84,16 @@ export function RecentSessions({ sessions, profiles, limit = 20 }: RecentSession
 }
 
 function projectLabel(cwd: string): string {
-  const parts = cwd.split('/').filter(Boolean);
+  const parts = cwd.split(/[\\/]+/).filter(Boolean);
   return parts.at(-1) ?? (cwd || '-');
+}
+
+function formatLastSeen(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return '-';
+  }
+  return timeFmt.format(date);
 }
 
 function durationLabel(session: SessionTelemetry): string | null {

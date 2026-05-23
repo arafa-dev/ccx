@@ -120,7 +120,12 @@ func (s *Service) installProfile(profile *contracts.Profile, binary string, forc
 		result.BackupPath = backup
 	}
 
-	status, disabled := statusForSettings(settings, profile.Name)
+	status, disabled, err := statusForSettings(settings, profile.Name)
+	if err != nil {
+		result.Status = StatusInvalid
+		result.Error = err.Error()
+		return result, err
+	}
 	result.Status = status
 	result.Disabled = disabled
 	result.Installed = status == StatusInstalled
@@ -167,7 +172,12 @@ func (s *Service) uninstallProfile(profile *contracts.Profile) (Result, error) {
 		result.Message = "no ccx hooks installed"
 	}
 
-	status, disabled := statusForSettings(settings, profile.Name)
+	status, disabled, err := statusForSettings(settings, profile.Name)
+	if err != nil {
+		result.Status = StatusInvalid
+		result.Error = err.Error()
+		return result, err
+	}
 	result.Status = status
 	result.Disabled = disabled
 	result.Installed = status == StatusInstalled
@@ -191,7 +201,12 @@ func (s *Service) statusProfile(profile *contracts.Profile) Result {
 		result.Message = "settings.json not found"
 		return result
 	}
-	status, disabled := statusForSettings(settings, profile.Name)
+	status, disabled, err := statusForSettings(settings, profile.Name)
+	if err != nil {
+		result.Status = StatusInvalid
+		result.Error = err.Error()
+		return result
+	}
 	result.Status = status
 	result.Disabled = disabled
 	result.Installed = result.Status == StatusInstalled
@@ -293,18 +308,24 @@ func removeManagedHooks(settings map[string]any, profile string) (bool, error) {
 	return changed, nil
 }
 
-func statusForSettings(settings map[string]any, profile string) (Status, bool) {
+func statusForSettings(settings map[string]any, profile string) (Status, bool, error) {
 	if disabled, ok := boolFromAny(settings["disableAllHooks"]); ok && disabled {
-		return StatusDisabled, true
+		return StatusDisabled, true, nil
 	}
 	hooks, err := hooksObject(settings, false)
-	if err != nil || hooks == nil {
-		return StatusPartial, false
+	if err != nil {
+		return StatusInvalid, false, err
+	}
+	if hooks == nil {
+		return StatusPartial, false, nil
 	}
 	installed := 0
 	for _, spec := range requiredHookSpecs {
 		groups, err := eventGroups(hooks, spec.Event, false)
-		if err != nil || groups == nil {
+		if err != nil {
+			return StatusInvalid, false, err
+		}
+		if groups == nil {
 			continue
 		}
 		if hasManagedHandlerInRequiredGroup(groups, spec, profile) {
@@ -312,9 +333,9 @@ func statusForSettings(settings map[string]any, profile string) (Status, bool) {
 		}
 	}
 	if installed == len(requiredHookSpecs) {
-		return StatusInstalled, false
+		return StatusInstalled, false, nil
 	}
-	return StatusPartial, false
+	return StatusPartial, false, nil
 }
 
 func hooksObject(settings map[string]any, create bool) (map[string]any, error) {
@@ -559,15 +580,32 @@ func writeSettings(path string, settings map[string]any, existed bool, now time.
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil { //nolint:gosec // path is derived from a registered profile config dir.
-		_ = os.Remove(tmp)
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*") //nolint:gosec // path is derived from a registered profile config dir.
+	if err != nil {
+		return "", fmt.Errorf("creating tmp settings: %w", err)
+	}
+	tmp := tmpFile.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmp)
+		}
+	}()
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
 		return "", fmt.Errorf("writing tmp settings: %w", err)
 	}
+	if err := tmpFile.Chmod(mode); err != nil {
+		_ = tmpFile.Close()
+		return "", fmt.Errorf("chmod tmp settings: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return "", fmt.Errorf("closing tmp settings: %w", err)
+	}
 	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
 		return "", fmt.Errorf("renaming tmp settings: %w", err)
 	}
+	cleanup = false
 	return backup, nil
 }
 

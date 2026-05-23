@@ -375,6 +375,43 @@ func TestUpdateMutatesExistingProfileAtomically(t *testing.T) {
 	}
 }
 
+func TestUpdateRunsCallbackOutsideManagerLock(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManager(t)
+	cfg := makeAbsDir(t, "work")
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: cfg}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- mgr.Update(ctx, "work", func(p *contracts.Profile) error {
+			if _, err := mgr.Get(ctx, "work"); err != nil {
+				return err
+			}
+			p.Label = "Work Account"
+			return nil
+		})
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Update callback deadlocked when it called back into manager")
+	}
+
+	got, err := mgr.Get(ctx, "work")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Label != "Work Account" {
+		t.Fatalf("Label = %q, want Work Account", got.Label)
+	}
+}
+
 func TestUpdateMissingProfileReturnsSentinel(t *testing.T) {
 	ctx := context.Background()
 	mgr := newTestManager(t)

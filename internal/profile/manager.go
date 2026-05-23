@@ -261,13 +261,11 @@ func (m *Manager) Update(ctx context.Context, name string, fn func(*contracts.Pr
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	reg, err := loadRegistry(m.Path())
 	if err != nil {
+		m.mu.Unlock()
 		return err
 	}
-
 	idx := -1
 	for i := range reg.Profiles {
 		if reg.Profiles[i].Name == name {
@@ -276,11 +274,16 @@ func (m *Manager) Update(ctx context.Context, name string, fn func(*contracts.Pr
 		}
 	}
 	if idx < 0 {
+		m.mu.Unlock()
 		return fmt.Errorf("profile %q: %w", name, contracts.ErrProfileNotFound)
 	}
-
 	next := reg.Profiles[idx]
+	m.mu.Unlock()
+
 	if err := fn(&next); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if next.Name != name {
@@ -288,6 +291,24 @@ func (m *Manager) Update(ctx context.Context, name string, fn func(*contracts.Pr
 	}
 	if err := ValidateProfile(next); err != nil {
 		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	reg, err = loadRegistry(m.Path())
+	if err != nil {
+		return err
+	}
+	idx = -1
+	for i := range reg.Profiles {
+		if reg.Profiles[i].Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("profile %q: %w", name, contracts.ErrProfileNotFound)
 	}
 	for i := range reg.Profiles {
 		if i == idx {

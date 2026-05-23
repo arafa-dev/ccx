@@ -67,13 +67,20 @@ func (s *Service) Record(ctx context.Context, opts RecordOptions) (RecordResult,
 		}
 	}
 
-	if err := s.Store.InsertHookEvent(ctx, opts.Profile, event); err != nil {
-		result.Error = err.Error()
-		return result, err
-	}
-	if err := s.Store.UpsertSessionTelemetry(ctx, opts.Profile, event); err != nil {
-		result.Error = err.Error()
-		return result, err
+	if recorder, ok := s.Store.(hookTelemetryRecorder); ok {
+		if err := recorder.RecordHookTelemetry(ctx, opts.Profile, event); err != nil {
+			result.Error = err.Error()
+			return result, err
+		}
+	} else {
+		if err := s.Store.InsertHookEvent(ctx, opts.Profile, event); err != nil {
+			result.Error = err.Error()
+			return result, err
+		}
+		if err := s.Store.UpsertSessionTelemetry(ctx, opts.Profile, event); err != nil {
+			result.Error = err.Error()
+			return result, err
+		}
 	}
 
 	result.Session = event.Session
@@ -85,6 +92,10 @@ func (s *Service) Record(ctx context.Context, opts RecordOptions) (RecordResult,
 
 type profileSaver interface {
 	SaveProfile(ctx context.Context, p contracts.Profile) error
+}
+
+type hookTelemetryRecorder interface {
+	RecordHookTelemetry(ctx context.Context, profileName string, event contracts.HookEvent) error
 }
 
 func (s *Service) parseHookEvent(r io.Reader, profile string) (contracts.HookEvent, error) {

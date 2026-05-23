@@ -20,6 +20,7 @@ const sessions: SessionTelemetry[] = Array.from({ length: 25 }, (_, i) => ({
   failure_details: '',
   compact_count: i % 3,
 }));
+const firstSession = sessions[0]!;
 
 describe('<RecentSessions>', () => {
   it('renders at most 20 rows', () => {
@@ -35,6 +36,28 @@ describe('<RecentSessions>', () => {
     expect(screen.getByText('failed')).toBeInTheDocument();
     expect(screen.getByText(/5m/)).toBeInTheDocument();
     expect(screen.getByText('rate_limit')).toBeInTheDocument();
+  });
+
+  it('renders a fallback when last_seen_at is invalid', () => {
+    render(
+      <RecentSessions
+        sessions={[{ ...firstSession, last_seen_at: 'not-a-date' }]}
+        profiles={[{ name: 'work' }]}
+      />,
+    );
+
+    expect(screen.getByText('-')).toBeInTheDocument();
+  });
+
+  it('uses the final Windows path segment as the project label', () => {
+    render(
+      <RecentSessions
+        sessions={[{ ...firstSession, cwd: 'C:\\Users\\arafa\\projects\\ccx' }]}
+        profiles={[{ name: 'work' }]}
+      />,
+    );
+
+    expect(screen.getByText('ccx')).toBeInTheDocument();
   });
 
   it('shows empty state when no rows', () => {

@@ -15,20 +15,65 @@ import (
 // authoritative because hook payloads may be forwarded without a profile
 // field; event.Profile is used only as a fallback.
 func (s *Store) InsertHookEvent(ctx context.Context, profileName string, event contracts.HookEvent) error { //nolint:gocritic // contracts.Store requires a value parameter.
-	if profileName == "" {
-		profileName = event.Profile
+	profileName, err := normalizeHookTelemetry(profileName, &event)
+	if err != nil {
+		return err
 	}
 
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
+	if err := insertHookEvent(ctx, s.db, profileName, &event); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RecordHookTelemetry stores the raw hook event and updates the session
+// aggregate in a single database transaction.
+func (s *Store) RecordHookTelemetry(ctx context.Context, profileName string, event contracts.HookEvent) (retErr error) { //nolint:gocritic // contracts.Store requires a value parameter.
+	profileName, err := normalizeHookTelemetry(profileName, &event)
+	if err != nil {
+		return err
+	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin hook telemetry record for %q/%q: %w", profileName, event.Session, err)
+	}
+	defer func() {
+		if retErr != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := insertHookEvent(ctx, tx, profileName, &event); err != nil {
+		return err
+	}
+	if err := upsertSessionTelemetry(ctx, tx, profileName, &event); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit hook telemetry record for %q/%q: %w", profileName, event.Session, err)
+	}
+	return nil
+}
+
+type hookEventExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func insertHookEvent(ctx context.Context, execer hookEventExecer, profileName string, event *contracts.HookEvent) error {
 	const q = `
 INSERT INTO hook_events (
     profile_name, session_id, event_name, ts, transcript_path, cwd, model,
     source, permission_mode, reason, error, error_details, trigger
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
-	if _, err := s.db.ExecContext(
+	if _, err := execer.ExecContext(
 		ctx, q,
 		profileName,
 		event.Session,
@@ -51,8 +96,9 @@ INSERT INTO hook_events (
 
 // UpsertSessionTelemetry folds one hook event into the session aggregate row.
 func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, event contracts.HookEvent) (retErr error) { //nolint:gocritic // contracts.Store requires a value parameter.
-	if profileName == "" {
-		profileName = event.Profile
+	profileName, err := normalizeHookTelemetry(profileName, &event)
+	if err != nil {
+		return err
 	}
 
 	s.writeMu.Lock()
@@ -68,6 +114,32 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 		}
 	}()
 
+	if err := upsertSessionTelemetry(ctx, tx, profileName, &event); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit session upsert for %q/%q: %w", profileName, event.Session, err)
+	}
+	return nil
+}
+
+func normalizeHookTelemetry(profileName string, event *contracts.HookEvent) (string, error) {
+	if profileName == "" {
+		profileName = event.Profile
+	}
+	if profileName == "" {
+		return "", errors.New("hook telemetry profile is empty")
+	}
+	if event.Session == "" {
+		return "", errors.New("hook telemetry session is empty")
+	}
+	if event.Event == "" {
+		return "", errors.New("hook telemetry event is empty")
+	}
+	return profileName, nil
+}
+
+func upsertSessionTelemetry(ctx context.Context, tx *sql.Tx, profileName string, event *contracts.HookEvent) error {
 	rec, found, err := loadSessionRecord(ctx, tx, profileName, event.Session)
 	if err != nil {
 		return err
@@ -86,7 +158,7 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 		rec.LastSeenAt = ts
 	}
 
-	mergeEventMetadata(&rec, &event, isNewer)
+	mergeEventMetadata(&rec, event, isNewer)
 	switch event.Event {
 	case "SessionStart":
 		if !rec.StartedAt.Valid || (ts != 0 && ts < rec.StartedAt.Int64) {
@@ -100,7 +172,7 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 		}
 	case "StopFailure":
 		applySessionStatus(&rec, "failed")
-		if shouldReplaceFailureFacts(&rec, &event, ts) {
+		if shouldReplaceFailureFacts(&rec, event, ts) {
 			rec.FailureError = event.Error
 			rec.FailureDetails = event.ErrorDetails
 			rec.FailureAt = sql.NullInt64{Int64: ts, Valid: true}
@@ -126,9 +198,6 @@ func (s *Store) UpsertSessionTelemetry(ctx context.Context, profileName string, 
 
 	if err := saveSessionRecord(ctx, tx, &rec); err != nil {
 		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit session upsert for %q/%q: %w", profileName, event.Session, err)
 	}
 	return nil
 }

@@ -95,6 +95,7 @@ func ingestProfile(ctx context.Context, deps *runtimeDeps, p contracts.Profile) 
 		batch = batch[:0]
 		return nil
 	}
+	var scanErr error
 	for events != nil || errs != nil {
 		select {
 		case <-ctx.Done():
@@ -119,9 +120,11 @@ func ingestProfile(ctx context.Context, deps *runtimeDeps, p contracts.Profile) 
 				continue
 			}
 			if err != nil {
-				return err
+				if scanErr == nil {
+					scanErr = err
+				}
 			}
 		}
 	}
-	return nil
+	return scanErr
 }

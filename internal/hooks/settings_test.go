@@ -406,6 +406,33 @@ func TestStatusReportsMissingPartialInstalledAndInvalid(t *testing.T) {
 	}
 }
 
+func TestStatusReportsInvalidForMalformedHookSettingsShape(t *testing.T) {
+	ctx := context.Background()
+	badHooks := testProfile(t, "bad-hooks")
+	badEventGroups := testProfile(t, "bad-event-groups")
+
+	writeFile(t, filepath.Join(badHooks.ConfigDir, "settings.json"), `{"hooks":[]}`)
+	writeFile(t, filepath.Join(badEventGroups.ConfigDir, "settings.json"), `{
+  "hooks": {
+    "Stop": {}
+  }
+}`)
+	svc := testService(badHooks, badEventGroups)
+
+	results, err := svc.Status(ctx, StatusOptions{})
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("results length = %d, want 2", len(results))
+	}
+	for _, result := range results {
+		if result.Status != StatusInvalid || result.Error == "" {
+			t.Fatalf("result for %s = %+v, want invalid with error", result.Profile, result)
+		}
+	}
+}
+
 func TestStatusReportsDisabledWhenAllHooksDisabled(t *testing.T) {
 	ctx := context.Background()
 	profile := testProfile(t, "work")

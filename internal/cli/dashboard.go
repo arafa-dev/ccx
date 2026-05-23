@@ -36,14 +36,16 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 				return err
 			}
 			if status.Running && status.URL != "" {
-				return openOrPrintDashboard(c, opts, status.URL, noOpen)
+				openOrPrintDashboard(c, opts, status.URL, noOpen)
+				return nil
 			}
 			if daemonMode {
 				result, err := ctrl.StartDetached(c.Context(), daemon.StartOptions{Port: port})
 				if err != nil {
 					return err
 				}
-				return openOrPrintDashboard(c, opts, result.Status.URL, noOpen)
+				openOrPrintDashboard(c, opts, result.Status.URL, noOpen)
+				return nil
 			}
 
 			ctx := c.Context()
@@ -110,12 +112,13 @@ func (i dashboardHeadroomIngestor) IngestHeadroomProfiles(ctx context.Context, p
 	return ingestSuggestProfiles(ctx, i.deps, profiles)
 }
 
-func openOrPrintDashboard(c *cobra.Command, opts *Options, url string, noOpen bool) error {
+func openOrPrintDashboard(c *cobra.Command, opts *Options, url string, noOpen bool) {
 	_, _ = fmt.Fprintf(c.OutOrStdout(), "ccx dashboard at %s\n", url)
 	if !noOpen {
-		return browserOpener(opts)(url)
+		if err := browserOpener(opts)(url); err != nil {
+			_, _ = fmt.Fprintf(c.ErrOrStderr(), "warning: failed to open browser: %v\n", err)
+		}
 	}
-	return nil
 }
 
 func browserOpener(opts *Options) func(string) error {

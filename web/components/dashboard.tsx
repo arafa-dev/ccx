@@ -33,6 +33,8 @@ function sessionParams(profile: string | null) {
   return profile ? { profile, since: '7d' } : { since: '7d' };
 }
 
+const LIVE_METADATA_REFRESH_INTERVAL_MS = 60_000;
+
 export function Dashboard() {
   const [profiles, setProfiles] = useState<ProfileWithTotals[]>([]);
   const [usageRows, setUsageRows] = useState<UsageRow[]>([]);
@@ -47,6 +49,8 @@ export function Dashboard() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const selectedProfileRef = useRef<string | null>(null);
   const liveRefreshInFlight = useRef(false);
+  const liveMetadataRefreshInFlight = useRef(false);
+  const lastLiveMetadataRefreshAt = useRef(0);
   const profileRefreshToken = useRef(0);
 
   const refreshAll = useCallback(async (profile: string | null) => {
@@ -70,7 +74,11 @@ export function Dashboard() {
       }
       setRefreshedAt(new Date());
       setLoadError(null);
+      lastLiveMetadataRefreshAt.current = Date.now();
     } catch (e) {
+      if (selectedProfileRef.current !== profile) {
+        return;
+      }
       setLoadError(e instanceof Error ? e.message : String(e));
     }
   }, []);
@@ -93,6 +101,9 @@ export function Dashboard() {
       setRefreshedAt(new Date());
       setLoadError(null);
     } catch (e) {
+      if (token !== profileRefreshToken.current || selectedProfileRef.current !== profile) {
+        return;
+      }
       setLoadError(e instanceof Error ? e.message : String(e));
     }
   }, []);
@@ -118,9 +129,48 @@ export function Dashboard() {
       setRefreshedAt(new Date());
       setLoadError(null);
     } catch (e) {
+      if (selectedProfileRef.current !== profile) {
+        return;
+      }
       setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
       liveRefreshInFlight.current = false;
+    }
+  }, []);
+
+  const refreshLiveMetadata = useCallback(async () => {
+    const now = Date.now();
+    if (
+      liveMetadataRefreshInFlight.current ||
+      now - lastLiveMetadataRefreshAt.current < LIVE_METADATA_REFRESH_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    liveMetadataRefreshInFlight.current = true;
+    lastLiveMetadataRefreshAt.current = now;
+    const profile = selectedProfileRef.current;
+    try {
+      const [d, h, sessionRows, hookRows] = await Promise.all([
+        getDaemonStatus(),
+        getHeadroom(),
+        getSessions(sessionParams(profile)),
+        getHooksStatus(),
+      ]);
+      setDaemonStatus(d);
+      setHeadroom(h);
+      setHookStatuses(hookRows);
+      if (selectedProfileRef.current === profile) {
+        setSessions(sessionRows);
+        setLoadError(null);
+      }
+    } catch (e) {
+      if (selectedProfileRef.current !== profile) {
+        return;
+      }
+      setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      liveMetadataRefreshInFlight.current = false;
     }
   }, []);
 
@@ -157,11 +207,12 @@ export function Dashboard() {
         setRefreshedAt(new Date());
         setLive('connected');
         void refreshLiveUsage();
+        void refreshLiveMetadata();
       },
       () => setLive('disconnected'),
     );
     return stop;
-  }, [refreshLiveUsage]);
+  }, [refreshLiveUsage, refreshLiveMetadata]);
 
   const profileMeta = profiles.map((p) => ({ name: p.name, color: p.color }));
 

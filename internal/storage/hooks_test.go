@@ -127,6 +127,98 @@ func TestUpsertSessionTelemetryLifecycle(t *testing.T) {
 	}
 }
 
+func TestRecordHookTelemetryWritesEventAndSessionAtomically(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	ts := time.Date(2026, 5, 20, 10, 15, 0, 0, time.UTC)
+	event := contracts.HookEvent{
+		Session:      "s1",
+		Event:        "StopFailure",
+		Timestamp:    ts,
+		Transcript:   "/tmp/s1.jsonl",
+		CWD:          "/repo",
+		Model:        "claude-sonnet-4-6",
+		Error:        "rate_limit",
+		ErrorDetails: "429 Too Many Requests",
+	}
+	if err := s.RecordHookTelemetry(ctx, "work", event); err != nil {
+		t.Fatalf("RecordHookTelemetry: %v", err)
+	}
+
+	failures, err := s.QueryRecentFailures(ctx, "work", ts.Add(-time.Second))
+	if err != nil {
+		t.Fatalf("QueryRecentFailures: %v", err)
+	}
+	if len(failures) != 1 || failures[0].Session != "s1" || failures[0].Error != "rate_limit" {
+		t.Fatalf("failures = %+v, want recorded StopFailure", failures)
+	}
+	sessions, err := s.QuerySessions(ctx, contracts.SessionQuery{Profile: "work"})
+	if err != nil {
+		t.Fatalf("QuerySessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(sessions))
+	}
+	if sessions[0].Status != "failed" || sessions[0].FailureError != "rate_limit" ||
+		sessions[0].Transcript != "/tmp/s1.jsonl" || sessions[0].CWD != "/repo" {
+		t.Fatalf("session aggregate = %+v, want failed session with event metadata", sessions[0])
+	}
+}
+
+func TestHookTelemetryRejectsMissingIdentityFields(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	cases := []struct {
+		name    string
+		profile string
+		event   contracts.HookEvent
+	}{
+		{
+			name:    "missing profile",
+			profile: "",
+			event: contracts.HookEvent{
+				Session: "s1",
+				Event:   "SessionStart",
+			},
+		},
+		{
+			name:    "missing session",
+			profile: "work",
+			event: contracts.HookEvent{
+				Event: "SessionStart",
+			},
+		},
+		{
+			name:    "missing event",
+			profile: "work",
+			event: contracts.HookEvent{
+				Session: "s1",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name+"/insert", func(t *testing.T) {
+			if err := s.InsertHookEvent(ctx, tc.profile, tc.event); err == nil {
+				t.Fatal("InsertHookEvent succeeded, want validation error")
+			}
+		})
+		t.Run(tc.name+"/upsert", func(t *testing.T) {
+			if err := s.UpsertSessionTelemetry(ctx, tc.profile, tc.event); err == nil {
+				t.Fatal("UpsertSessionTelemetry succeeded, want validation error")
+			}
+		})
+		t.Run(tc.name+"/record", func(t *testing.T) {
+			if err := s.RecordHookTelemetry(ctx, tc.profile, tc.event); err == nil {
+				t.Fatal("RecordHookTelemetry succeeded, want validation error")
+			}
+		})
+	}
+}
+
 func TestQuerySessionsReturnsEmptySliceWhenNoRows(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

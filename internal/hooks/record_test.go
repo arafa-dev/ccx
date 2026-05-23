@@ -115,6 +115,7 @@ func TestRecordParsesHookPayloadsAndStoresTelemetry(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			beforeInsert := len(store.inserted)
+			beforeRecord := len(store.recorded)
 			beforeUpsert := len(store.upserted)
 			result, err := svc.Record(ctx, RecordOptions{
 				Profile: "work",
@@ -126,17 +127,17 @@ func TestRecordParsesHookPayloadsAndStoresTelemetry(t *testing.T) {
 			if !result.Recorded || result.Profile != "work" || result.Event != tc.want.Event {
 				t.Fatalf("result = %+v, want recorded event %s", result, tc.want.Event)
 			}
-			if len(store.inserted) != beforeInsert+1 {
-				t.Fatalf("insert calls = %d, want %d", len(store.inserted), beforeInsert+1)
+			if len(store.recorded) != beforeRecord+1 {
+				t.Fatalf("atomic record calls = %d, want %d", len(store.recorded), beforeRecord+1)
 			}
-			if len(store.upserted) != beforeUpsert+1 {
-				t.Fatalf("upsert calls = %d, want %d", len(store.upserted), beforeUpsert+1)
+			if len(store.inserted) != beforeInsert {
+				t.Fatalf("separate insert calls = %d, want unchanged %d", len(store.inserted), beforeInsert)
 			}
-			if got := store.inserted[len(store.inserted)-1]; got.profile != "work" || got.event != tc.want {
-				t.Fatalf("InsertHookEvent = (%q, %+v), want (work, %+v)", got.profile, got.event, tc.want)
+			if len(store.upserted) != beforeUpsert {
+				t.Fatalf("separate upsert calls = %d, want unchanged %d", len(store.upserted), beforeUpsert)
 			}
-			if got := store.upserted[len(store.upserted)-1]; got.profile != "work" || got.event != tc.want {
-				t.Fatalf("UpsertSessionTelemetry = (%q, %+v), want (work, %+v)", got.profile, got.event, tc.want)
+			if got := store.recorded[len(store.recorded)-1]; got.profile != "work" || got.event != tc.want {
+				t.Fatalf("RecordHookTelemetry = (%q, %+v), want (work, %+v)", got.profile, got.event, tc.want)
 			}
 		})
 	}
@@ -234,6 +235,7 @@ func TestRecordRejectsMalformedPayloadsBeforeStoreWrites(t *testing.T) {
 
 type fakeHookStore struct {
 	saved    []contracts.Profile
+	recorded []storedHookEvent
 	inserted []storedHookEvent
 	upserted []storedHookEvent
 }
@@ -256,6 +258,14 @@ func (f *fakeHookStore) InsertHookEvent(ctx context.Context, profileName string,
 		return err
 	}
 	f.inserted = append(f.inserted, storedHookEvent{profile: profileName, event: event})
+	return nil
+}
+
+func (f *fakeHookStore) RecordHookTelemetry(ctx context.Context, profileName string, event contracts.HookEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.recorded = append(f.recorded, storedHookEvent{profile: profileName, event: event})
 	return nil
 }
 

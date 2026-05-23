@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -137,6 +138,38 @@ func TestDashboardUsesRunningDaemonURLAndExits(t *testing.T) {
 	}
 	if opened != "http://127.0.0.1:7781" {
 		t.Fatalf("opened = %q", opened)
+	}
+}
+
+func TestDashboardUsesRunningDaemonURLWhenBrowserOpenFails(t *testing.T) {
+	root := t.TempDir()
+	proc := newCLIFakeProcess(root)
+	proc.setAlive(2468, true)
+	writeDaemonRuntime(t, root, contracts.DaemonStatus{
+		PID:     2468,
+		Version: "test",
+		Port:    7781,
+		URL:     "http://127.0.0.1:7781",
+		Running: true,
+	})
+
+	out, stderr, code := runCLIWithOptions(Options{
+		Args:          []string{"dashboard"},
+		Build:         BuildInfo{Version: "test"},
+		DaemonRoot:    root,
+		DaemonProcess: proc,
+		OpenBrowser: func(string) error {
+			return errors.New("browser missing")
+		},
+	})
+	if code != 0 {
+		t.Fatalf("dashboard exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(out, "http://127.0.0.1:7781") {
+		t.Fatalf("dashboard output = %q", out)
+	}
+	if !strings.Contains(stderr, "warning: failed to open browser: browser missing") {
+		t.Fatalf("stderr = %q, want browser warning", stderr)
 	}
 }
 

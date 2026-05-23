@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Dashboard } from './dashboard';
@@ -158,6 +158,7 @@ vi.mock('@/lib/api', async () => {
 
 describe('<Dashboard>', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     vi.mocked(getProfiles).mockImplementation(async () => profiles);
     vi.mocked(getUsage).mockImplementation(async ({ profile }: { profile?: string } = {}) => {
@@ -175,6 +176,10 @@ describe('<Dashboard>', () => {
     vi.mocked(getSessions).mockImplementation(async () => sessions);
     vi.mocked(getHooksStatus).mockImplementation(async () => hooks);
     vi.mocked(streamUsage).mockImplementation(() => () => {});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('shows loading state during the initial dashboard load instead of onboarding empty', async () => {
@@ -274,6 +279,45 @@ describe('<Dashboard>', () => {
     expect(getSessions).toHaveBeenCalledOnce();
   });
 
+  it('throttles expensive metadata refreshes during live usage SSE ticks', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-05-19T12:00:00Z'));
+
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    await screen.findByRole('region', { name: /recommended profile/i });
+    const onUsage = vi.mocked(streamUsage).mock.calls[0]?.[0];
+    expect(onUsage).toBeDefined();
+
+    vi.mocked(getDaemonStatus).mockClear();
+    vi.mocked(getHeadroom).mockClear();
+    vi.mocked(getHooksStatus).mockClear();
+    vi.mocked(getSessions).mockClear();
+
+    await act(async () => {
+      onUsage?.([]);
+    });
+
+    expect(getDaemonStatus).not.toHaveBeenCalled();
+    expect(getHeadroom).not.toHaveBeenCalled();
+    expect(getHooksStatus).not.toHaveBeenCalled();
+    expect(getSessions).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.setSystemTime(new Date('2026-05-19T12:01:01Z'));
+      onUsage?.([]);
+    });
+
+    await waitFor(() => expect(getDaemonStatus).toHaveBeenCalledOnce());
+    expect(getHeadroom).toHaveBeenCalledOnce();
+    expect(getHooksStatus).toHaveBeenCalledOnce();
+    expect(getSessions).toHaveBeenCalledWith({ since: '7d' });
+  });
+
   it('skips overlapping live usage refreshes while one is in flight', async () => {
     render(
       <ThemeProvider>
@@ -306,6 +350,43 @@ describe('<Dashboard>', () => {
     await act(async () => {
       resolveLiveUsage({ rows: allRows, total: blankTotal() });
     });
+  });
+
+  it('ignores stale profile refresh errors after selecting another profile', async () => {
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    await screen.findByRole('region', { name: /recommended profile/i });
+
+    const originalGetUsage = vi.mocked(getUsage).getMockImplementation();
+    let rejectWorkUsage: (reason: Error) => void = () => {};
+    vi.mocked(getUsage).mockImplementation(({ profile }: { profile?: string } = {}) => {
+      if (profile === 'work') {
+        return new Promise<UsageResponse>((_, reject) => {
+          rejectWorkUsage = reject;
+        });
+      }
+      return originalGetUsage?.({ profile }) ?? Promise.resolve({ rows: [], total: blankTotal() });
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /filter/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /^work$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /filter/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /^personal$/i }));
+
+    await waitFor(() => {
+      const topProjects = screen.getByRole('region', { name: /top projects/i });
+      expect(within(topProjects).getByText('hobby')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      rejectWorkUsage(new Error('stale work failure'));
+    });
+
+    expect(screen.queryByText(/stale work failure/i)).not.toBeInTheDocument();
   });
 
   it('renders daemon mode, recommendation, telemetry, and hook health', async () => {

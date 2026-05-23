@@ -98,15 +98,42 @@ func (w *profileWatcher) refreshProfiles(ctx context.Context) {
 		w.logger.Printf("list profiles for watcher: %v", err)
 		return
 	}
-	w.mu.Lock()
+	nextProfiles := make(map[string]contracts.Profile, len(profiles))
+	nextProjectsDirs := make(map[string]string, len(profiles))
 	for i := range profiles {
 		p := profiles[i]
-		w.profiles[p.Name] = p
-		w.projectsDirs[p.Name] = filepath.Clean(filepath.Join(p.ConfigDir, "projects"))
+		nextProfiles[p.Name] = p
+		nextProjectsDirs[p.Name] = filepath.Clean(filepath.Join(p.ConfigDir, "projects"))
 	}
+
+	w.mu.Lock()
+	removedRoots := make([]string, 0)
+	for name, root := range w.projectsDirs {
+		if nextRoot, ok := nextProjectsDirs[name]; ok && nextRoot == root {
+			continue
+		}
+		removedRoots = append(removedRoots, root)
+		if timer, ok := w.timers[name]; ok {
+			timer.Stop()
+			delete(w.timers, name)
+		}
+	}
+	w.profiles = nextProfiles
+	w.projectsDirs = nextProjectsDirs
 	w.mu.Unlock()
+
 	for i := range profiles {
 		w.addProfileWatches(profiles[i])
+	}
+	if len(removedRoots) == 0 {
+		return
+	}
+	keptRoots := make(map[string]struct{}, len(nextProjectsDirs))
+	for _, root := range nextProjectsDirs {
+		keptRoots[root] = struct{}{}
+	}
+	for _, root := range removedRoots {
+		w.removeProfileWatches(root, keptRoots)
 	}
 }
 
@@ -145,6 +172,42 @@ func (w *profileWatcher) addWatch(path string) error {
 	w.watched[clean] = struct{}{}
 	w.mu.Unlock()
 	return nil
+}
+
+func (w *profileWatcher) removeProfileWatches(root string, keptRoots map[string]struct{}) {
+	cleanRoot := filepath.Clean(root)
+	w.mu.Lock()
+	paths := make([]string, 0)
+	for path := range w.watched {
+		if !pathWithinRoot(path, cleanRoot) {
+			continue
+		}
+		kept := false
+		for keptRoot := range keptRoots {
+			if pathWithinRoot(path, keptRoot) {
+				kept = true
+				break
+			}
+		}
+		if kept {
+			continue
+		}
+		paths = append(paths, path)
+		delete(w.watched, path)
+	}
+	w.mu.Unlock()
+
+	for _, path := range paths {
+		if err := w.fs.Remove(path); err != nil {
+			w.logger.Printf("watch remove %s: %v", path, err)
+		}
+	}
+}
+
+func pathWithinRoot(path, root string) bool {
+	clean := filepath.Clean(path)
+	cleanRoot := filepath.Clean(root)
+	return clean == cleanRoot || strings.HasPrefix(clean, cleanRoot+string(filepath.Separator))
 }
 
 func (w *profileWatcher) handleEvent(event fsnotify.Event) {

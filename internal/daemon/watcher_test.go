@@ -2,10 +2,86 @@ package daemon
 
 import (
 	"context"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/arafa-dev/ccx/internal/contracts"
+	"github.com/arafa-dev/ccx/internal/profile"
+	"github.com/fsnotify/fsnotify"
 )
+
+func TestRefreshProfilesRemovesDeletedProfilesAndWatches(t *testing.T) {
+	ctx := context.Background()
+	mgr, err := profile.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	workCfg := filepath.Join(t.TempDir(), "work")
+	sideCfg := filepath.Join(t.TempDir(), "side")
+	for _, cfg := range []string{workCfg, sideCfg} {
+		if err := os.MkdirAll(filepath.Join(cfg, "projects", "repo"), 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", cfg, err)
+		}
+	}
+	if err := mgr.Add(ctx, contracts.Profile{Name: "work", ConfigDir: workCfg}); err != nil {
+		t.Fatalf("Add work: %v", err)
+	}
+	if err := mgr.Add(ctx, contracts.Profile{Name: "side", ConfigDir: sideCfg}); err != nil {
+		t.Fatalf("Add side: %v", err)
+	}
+
+	fsWatcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer func() { _ = fsWatcher.Close() }()
+	w := &profileWatcher{
+		deps:         &runtimeDeps{Profiles: mgr},
+		logger:       log.New(io.Discard, "", 0),
+		fs:           fsWatcher,
+		profiles:     map[string]contracts.Profile{},
+		projectsDirs: map[string]string{},
+		watched:      map[string]struct{}{},
+		timers:       map[string]*time.Timer{},
+	}
+	w.refreshProfiles(ctx)
+	workRoot := filepath.Clean(filepath.Join(workCfg, "projects"))
+	sideRoot := filepath.Clean(filepath.Join(sideCfg, "projects"))
+	if _, ok := w.profiles["work"]; !ok {
+		t.Fatal("work profile missing after initial refresh")
+	}
+	if _, ok := w.watched[workRoot]; !ok {
+		t.Fatalf("work root %q not watched after initial refresh", workRoot)
+	}
+
+	if err := mgr.Remove(ctx, "work"); err != nil {
+		t.Fatalf("Remove work: %v", err)
+	}
+	w.refreshProfiles(ctx)
+	if _, ok := w.profiles["work"]; ok {
+		t.Fatal("deleted work profile still cached after refresh")
+	}
+	if _, ok := w.projectsDirs["work"]; ok {
+		t.Fatal("deleted work projects dir still cached after refresh")
+	}
+	if _, ok := w.watched[workRoot]; ok {
+		t.Fatalf("deleted work root %q still watched after refresh", workRoot)
+	}
+	if got := w.profileForPath(filepath.Join(workRoot, "repo", "session.jsonl")); got != "" {
+		t.Fatalf("profileForPath(deleted work path) = %q, want empty", got)
+	}
+	if _, ok := w.profiles["side"]; !ok {
+		t.Fatal("side profile should remain cached")
+	}
+	if _, ok := w.watched[sideRoot]; !ok {
+		t.Fatalf("side root %q should remain watched", sideRoot)
+	}
+}
 
 func TestScanWorkerCoalescesRequestsAndRunsOneAtATime(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
