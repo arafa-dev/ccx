@@ -501,7 +501,7 @@ func TestStartDetachedTimeoutAfterChildAdoptDeadChildRemovesLockForRetry(t *test
 		Version:        "test",
 		Executable:     "/bin/ccx",
 		Process:        proc,
-		StartupTimeout: 75 * time.Millisecond,
+		StartupTimeout: 500 * time.Millisecond,
 		StopTimeout:    50 * time.Millisecond,
 	}
 

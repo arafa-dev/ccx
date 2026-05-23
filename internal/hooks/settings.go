@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
@@ -484,7 +485,7 @@ func isManagedHandler(handler map[string]any, profile string) bool {
 		return false
 	}
 	command, ok := stringFromAny(handler["command"])
-	if !ok || command == "" || !filepath.IsAbs(command) {
+	if !ok || command == "" || !isAbsoluteCommandPath(command) {
 		return false
 	}
 	args, ok := stringsFromAny(handler["args"])
@@ -506,6 +507,20 @@ func isManagedHandler(handler map[string]any, profile string) bool {
 		return false
 	}
 	return true
+}
+
+func isAbsoluteCommandPath(path string) bool {
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") || strings.HasPrefix(path, `\\`) {
+		return true
+	}
+	if len(path) < 3 || path[1] != ':' {
+		return false
+	}
+	drive := path[0]
+	if (drive < 'A' || drive > 'Z') && (drive < 'a' || drive > 'z') {
+		return false
+	}
+	return path[2] == '\\' || path[2] == '/'
 }
 
 func stringFromAny(v any) (string, bool) {

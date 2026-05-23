@@ -433,6 +433,17 @@ func TestStatusReportsInvalidForMalformedHookSettingsShape(t *testing.T) {
 	}
 }
 
+func TestAbsoluteCommandPathAcceptsCrossPlatformHookCommands(t *testing.T) {
+	for _, path := range []string{"/usr/local/bin/ccx", `C:\Program Files\ccx\ccx.exe`, `\\server\share\ccx.exe`} {
+		if !isAbsoluteCommandPath(path) {
+			t.Fatalf("isAbsoluteCommandPath(%q) = false, want true", path)
+		}
+	}
+	if isAbsoluteCommandPath("ccx") {
+		t.Fatal("isAbsoluteCommandPath(relative command) = true, want false")
+	}
+}
+
 func TestStatusReportsDisabledWhenAllHooksDisabled(t *testing.T) {
 	ctx := context.Background()
 	profile := testProfile(t, "work")
@@ -621,7 +632,7 @@ func managedHandlers(handlers []map[string]json.RawMessage, profile string) []ma
 	var out []map[string]json.RawMessage
 	for _, handler := range handlers {
 		command := stringValueNoFatal(handler["command"])
-		if command == "" || !filepath.IsAbs(command) {
+		if command == "" || !isAbsoluteCommandPath(command) {
 			continue
 		}
 		if stringValueNoFatal(handler["type"]) != "command" {
