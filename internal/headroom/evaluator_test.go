@@ -210,6 +210,32 @@ func TestAuthenticationFailureIsResolvedByLaterSuccessfulSession(t *testing.T) {
 	}
 }
 
+func TestAuthenticationFailureIsResolvedByLaterEndedSession(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	store.addWorkFailure(contracts.HookEvent{
+		Event:     "StopFailure",
+		Timestamp: now.Add(-2 * time.Hour),
+		Error:     "authentication_failed",
+	})
+	store.addWorkSession(contracts.SessionTelemetry{
+		Profile:    "work",
+		Session:    "recovered",
+		StartedAt:  now.Add(-time.Hour),
+		EndedAt:    now.Add(-50 * time.Minute),
+		LastSeenAt: now.Add(-50 * time.Minute),
+		Status:     "ended",
+	})
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("work", contracts.ProfileLimits{DailyTokenBudget: 1000}),
+	})
+	got := mustCandidate(t, result, "work")
+	if !got.Available {
+		t.Fatalf("candidate available = false, want ended session to recover auth failure: %+v", got)
+	}
+}
+
 func TestAuthenticationFailuresRespectIncludeUnavailable(t *testing.T) {
 	now := testNow()
 	store := newFakeStore(now)

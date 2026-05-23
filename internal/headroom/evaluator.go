@@ -347,7 +347,7 @@ func sessionResolvesAuthFailure(session *contracts.SessionTelemetry, failureAt t
 		return false
 	}
 	switch session.Status {
-	case "completed":
+	case "completed", "ended":
 		return session.EndedAt.After(failureAt) || session.LastSeenAt.After(failureAt)
 	case "running":
 		return session.StartedAt.After(failureAt) || session.LastSeenAt.After(failureAt)
