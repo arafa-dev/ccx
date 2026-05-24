@@ -3,6 +3,7 @@ package contracts_test
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,64 @@ func TestProfileLimitsJSONUsesContractFieldNames(t *testing.T) {
 	for _, name := range []string{"DailyTokenBudget", "WeeklyTokenBudget", "MonthlyUSDBudget", "SuggestEnabled", "RateLimitCooldown"} {
 		if _, ok := limits[name]; ok {
 			t.Errorf("marshaled ProfileLimits included Go field name %q in %s", name, fields["limits"])
+		}
+	}
+}
+
+func TestProfileLimitsPlanFieldsRoundtrip(t *testing.T) {
+	in := contracts.ProfileLimits{
+		DailyTokenBudget: 1_000_000,
+		PlanTier:         "max20",
+		WeeklyAnchor:     "monday",
+		Caps5hTurns:      900,
+		CapsWeeklyTurns:  4500,
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("Unmarshal fields: %v", err)
+	}
+	for _, name := range []string{"plan_tier", "weekly_anchor", "caps_5h_turns", "caps_weekly_turns"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled ProfileLimits missing field %q in %s", name, data)
+		}
+	}
+	for _, name := range []string{"PlanTier", "WeeklyAnchor", "Caps5hTurns", "CapsWeeklyTurns"} {
+		if _, ok := fields[name]; ok {
+			t.Errorf("marshaled ProfileLimits included Go field name %q in %s", name, data)
+		}
+	}
+	var out contracts.ProfileLimits
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.PlanTier != "max20" {
+		t.Errorf("PlanTier = %q, want %q", out.PlanTier, "max20")
+	}
+	if out.WeeklyAnchor != "monday" {
+		t.Errorf("WeeklyAnchor = %q, want %q", out.WeeklyAnchor, "monday")
+	}
+	if out.Caps5hTurns != 900 {
+		t.Errorf("Caps5hTurns = %d, want 900", out.Caps5hTurns)
+	}
+	if out.CapsWeeklyTurns != 4500 {
+		t.Errorf("CapsWeeklyTurns = %d, want 4500", out.CapsWeeklyTurns)
+	}
+}
+
+func TestProfileLimitsPlanFieldsOmitEmpty(t *testing.T) {
+	in := contracts.ProfileLimits{DailyTokenBudget: 100}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	for _, key := range []string{"plan_tier", "weekly_anchor", "caps_5h_turns", "caps_weekly_turns", "PlanTier", "WeeklyAnchor", "Caps5hTurns", "CapsWeeklyTurns"} {
+		if strings.Contains(s, key) {
+			t.Errorf("expected %q to be omitted from %q", key, s)
 		}
 	}
 }

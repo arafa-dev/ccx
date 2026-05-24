@@ -28,6 +28,25 @@ type ProfileLimits struct {
 	Priority          int     `json:"priority"            toml:"priority,omitempty"`
 	SuggestEnabled    *bool   `json:"suggest_enabled"     toml:"suggest_enabled,omitempty"`
 	RateLimitCooldown string  `json:"rate_limit_cooldown" toml:"rate_limit_cooldown,omitempty"`
+
+	// PlanTier identifies the Anthropic subscription tier this profile uses.
+	// One of "pro", "max5", "max20", "api". Empty disables plan-aware quota
+	// tracking for this profile.
+	PlanTier string `json:"plan_tier,omitempty" toml:"plan_tier,omitempty"`
+
+	// WeeklyAnchor controls how the weekly quota window is computed. "rolling"
+	// (default) counts the trailing 7 days. A weekday name ("monday".."sunday")
+	// anchors the window to the most recent occurrence of that weekday at
+	// 00:00 UTC.
+	WeeklyAnchor string `json:"weekly_anchor,omitempty" toml:"weekly_anchor,omitempty"`
+
+	// Caps5hTurns overrides the shipped default 5-hour-window turn cap. Zero
+	// means "use the shipped default for PlanTier".
+	Caps5hTurns int `json:"caps_5h_turns,omitempty" toml:"caps_5h_turns,omitempty"`
+
+	// CapsWeeklyTurns overrides the shipped default weekly turn cap. Zero
+	// means "use the shipped default for PlanTier".
+	CapsWeeklyTurns int `json:"caps_weekly_turns,omitempty" toml:"caps_weekly_turns,omitempty"`
 }
 
 // DaemonStatus is the daemon's externally visible runtime state.
