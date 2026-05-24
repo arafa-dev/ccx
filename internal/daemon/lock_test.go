@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,6 +188,15 @@ func TestChildAdoptWithRetryWaitsForParentChildPIDClaim(t *testing.T) {
 	record := readLockRecordForTest(t, &paths)
 	if record.Token != "parent-token" || record.PID != 22 || record.ChildPID != 0 {
 		t.Fatalf("lock after retry adopt = %+v, want child ownership", record)
+	}
+}
+
+func TestShouldRetryLockAdoptError(t *testing.T) {
+	if !shouldRetryLockAdoptError(fmt.Errorf("wrapped: %w", errLockChildPIDPending)) {
+		t.Fatal("child pid pending error should be retried")
+	}
+	if shouldRetryLockAdoptError(errors.New("token mismatch")) {
+		t.Fatal("token mismatch error should not be retried")
 	}
 }
 

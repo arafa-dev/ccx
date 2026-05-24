@@ -174,7 +174,7 @@ func adoptDaemonLockWithRetry(ctx context.Context, paths *Paths, token string, p
 		if err == nil {
 			return lock, nil
 		}
-		if !errors.Is(err, errLockChildPIDPending) {
+		if !shouldRetryLockAdoptError(err) {
 			return nil, err
 		}
 		lastErr = err
@@ -187,6 +187,10 @@ func adoptDaemonLockWithRetry(ctx context.Context, paths *Paths, token string, p
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
+}
+
+func shouldRetryLockAdoptError(err error) bool {
+	return errors.Is(err, errLockChildPIDPending) || isTransientLockAccessError(err)
 }
 
 func newLockToken() (string, error) {
