@@ -28,6 +28,71 @@ type ProfileLimits struct {
 	Priority          int     `json:"priority"            toml:"priority,omitempty"`
 	SuggestEnabled    *bool   `json:"suggest_enabled"     toml:"suggest_enabled,omitempty"`
 	RateLimitCooldown string  `json:"rate_limit_cooldown" toml:"rate_limit_cooldown,omitempty"`
+
+	// PlanTier identifies the Anthropic subscription tier this profile uses.
+	// One of "pro", "max5", "max20", "api". Empty disables plan-aware quota
+	// tracking for this profile.
+	PlanTier string `json:"plan_tier,omitempty" toml:"plan_tier,omitempty"`
+
+	// WeeklyAnchor controls how the weekly quota window is computed. "rolling"
+	// (default) counts the trailing 7 days. A weekday name ("monday".."sunday")
+	// anchors the window to the most recent occurrence of that weekday at
+	// 00:00 UTC.
+	WeeklyAnchor string `json:"weekly_anchor,omitempty" toml:"weekly_anchor,omitempty"`
+
+	// Caps5hTurns overrides the shipped default 5-hour-window turn cap. Zero
+	// means "use the shipped default for PlanTier".
+	Caps5hTurns int `json:"caps_5h_turns,omitempty" toml:"caps_5h_turns,omitempty"`
+
+	// CapsWeeklyTurns overrides the shipped default weekly turn cap. Zero
+	// means "use the shipped default for PlanTier".
+	CapsWeeklyTurns int `json:"caps_weekly_turns,omitempty" toml:"caps_weekly_turns,omitempty"`
+}
+
+// QuotaWindow describes turn usage within a single quota window (rolling 5h
+// or weekly). Cap is zero when the owning profile has no PlanTier configured.
+type QuotaWindow struct {
+	Used     int       `json:"used"`
+	Cap      int       `json:"cap"`
+	Pct      float64   `json:"pct"`
+	ResetsAt time.Time `json:"resets_at"`
+}
+
+// ProfileQuota is the per-profile response shape returned by GET /api/quota.
+// Both windows are always present; their Cap field is zero when no plan tier
+// is configured for the profile.
+type ProfileQuota struct {
+	Profile      string      `json:"profile"`
+	PlanTier     string      `json:"plan_tier"`
+	Window5h     QuotaWindow `json:"window_5h"`
+	WindowWeekly QuotaWindow `json:"window_weekly"`
+}
+
+// RecommendationLevel categorizes the urgency of a streamed pressure-driven
+// recommendation. Thresholds (warn/soft/hard) are evaluator-defined.
+type RecommendationLevel string
+
+const (
+	// RecommendationWarn signals a profile crossed the early-warning threshold.
+	RecommendationWarn RecommendationLevel = "warn"
+	// RecommendationSoft signals a profile crossed the soft-penalty threshold.
+	RecommendationSoft RecommendationLevel = "soft"
+	// RecommendationHard signals a profile is at or above its hard cap.
+	RecommendationHard RecommendationLevel = "hard"
+)
+
+// RecommendationEvent is the payload emitted over /api/recommendations/live
+// when the daemon detects a profile crossing a pressure threshold and a
+// switch may be warranted. Suggested is empty when no sibling has more
+// headroom than the crossed profile.
+type RecommendationEvent struct {
+	Profile        string              `json:"profile"`
+	Level          RecommendationLevel `json:"level"`
+	Reason         string              `json:"reason"`
+	Suggested      string              `json:"suggested,omitempty"`
+	Quota5hPct     float64             `json:"quota_5h_pct"`
+	QuotaWeeklyPct float64             `json:"quota_weekly_pct"`
+	Timestamp      time.Time           `json:"timestamp"`
 }
 
 // DaemonStatus is the daemon's externally visible runtime state.

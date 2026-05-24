@@ -3,6 +3,7 @@ package contracts_test
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +84,253 @@ func TestProfileLimitsJSONUsesContractFieldNames(t *testing.T) {
 		if _, ok := limits[name]; ok {
 			t.Errorf("marshaled ProfileLimits included Go field name %q in %s", name, fields["limits"])
 		}
+	}
+}
+
+func TestProfileLimitsPlanFieldsRoundtrip(t *testing.T) {
+	in := contracts.ProfileLimits{
+		DailyTokenBudget: 1_000_000,
+		PlanTier:         "max20",
+		WeeklyAnchor:     "monday",
+		Caps5hTurns:      900,
+		CapsWeeklyTurns:  4500,
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("Unmarshal fields: %v", err)
+	}
+	for _, name := range []string{"plan_tier", "weekly_anchor", "caps_5h_turns", "caps_weekly_turns"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled ProfileLimits missing field %q in %s", name, data)
+		}
+	}
+	for _, name := range []string{"PlanTier", "WeeklyAnchor", "Caps5hTurns", "CapsWeeklyTurns"} {
+		if _, ok := fields[name]; ok {
+			t.Errorf("marshaled ProfileLimits included Go field name %q in %s", name, data)
+		}
+	}
+	var out contracts.ProfileLimits
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.PlanTier != "max20" {
+		t.Errorf("PlanTier = %q, want %q", out.PlanTier, "max20")
+	}
+	if out.WeeklyAnchor != "monday" {
+		t.Errorf("WeeklyAnchor = %q, want %q", out.WeeklyAnchor, "monday")
+	}
+	if out.Caps5hTurns != 900 {
+		t.Errorf("Caps5hTurns = %d, want 900", out.Caps5hTurns)
+	}
+	if out.CapsWeeklyTurns != 4500 {
+		t.Errorf("CapsWeeklyTurns = %d, want 4500", out.CapsWeeklyTurns)
+	}
+}
+
+func TestProfileLimitsPlanFieldsOmitEmpty(t *testing.T) {
+	in := contracts.ProfileLimits{DailyTokenBudget: 100}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	for _, key := range []string{"plan_tier", "weekly_anchor", "caps_5h_turns", "caps_weekly_turns", "PlanTier", "WeeklyAnchor", "Caps5hTurns", "CapsWeeklyTurns"} {
+		if strings.Contains(s, key) {
+			t.Errorf("expected %q to be omitted from %q", key, s)
+		}
+	}
+}
+
+func TestQuotaWindowJSON(t *testing.T) {
+	in := contracts.QuotaWindow{
+		Used:     142,
+		Cap:      900,
+		Pct:      15.78,
+		ResetsAt: time.Date(2026, 5, 24, 18, 42, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("Unmarshal fields: %v", err)
+	}
+	for _, name := range []string{"used", "cap", "pct", "resets_at"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled QuotaWindow missing field %q in %s", name, data)
+		}
+	}
+	for _, name := range []string{"Used", "Cap", "Pct", "ResetsAt"} {
+		if _, ok := fields[name]; ok {
+			t.Errorf("marshaled QuotaWindow included Go field name %q in %s", name, data)
+		}
+	}
+	var out contracts.QuotaWindow
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Used != 142 || out.Cap != 900 {
+		t.Errorf("counts: got used=%d cap=%d, want 142/900", out.Used, out.Cap)
+	}
+	if out.Pct != 15.78 {
+		t.Errorf("Pct = %v, want 15.78", out.Pct)
+	}
+	if !out.ResetsAt.Equal(in.ResetsAt) {
+		t.Errorf("ResetsAt: got %v, want %v", out.ResetsAt, in.ResetsAt)
+	}
+}
+
+func TestProfileQuotaJSON(t *testing.T) {
+	in := contracts.ProfileQuota{
+		Profile:      "work",
+		PlanTier:     "max20",
+		Window5h:     contracts.QuotaWindow{Used: 142, Cap: 900, Pct: 15.78},
+		WindowWeekly: contracts.QuotaWindow{Used: 1203, Cap: 4500, Pct: 26.73},
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("Unmarshal fields: %v", err)
+	}
+	for _, name := range []string{"profile", "plan_tier", "window_5h", "window_weekly"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled ProfileQuota missing field %q in %s", name, data)
+		}
+	}
+	for _, name := range []string{"Profile", "PlanTier", "Window5h", "WindowWeekly"} {
+		if _, ok := fields[name]; ok {
+			t.Errorf("marshaled ProfileQuota included Go field name %q in %s", name, data)
+		}
+	}
+	for fieldName, raw := range map[string]json.RawMessage{
+		"window_5h":     fields["window_5h"],
+		"window_weekly": fields["window_weekly"],
+	} {
+		var windowFields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &windowFields); err != nil {
+			t.Fatalf("Unmarshal %s fields: %v", fieldName, err)
+		}
+		for _, name := range []string{"used", "cap", "pct", "resets_at"} {
+			if _, ok := windowFields[name]; !ok {
+				t.Errorf("marshaled ProfileQuota.%s missing field %q in %s", fieldName, name, raw)
+			}
+		}
+		for _, name := range []string{"Used", "Cap", "Pct", "ResetsAt"} {
+			if _, ok := windowFields[name]; ok {
+				t.Errorf("marshaled ProfileQuota.%s included Go field name %q in %s", fieldName, name, raw)
+			}
+		}
+	}
+	var out contracts.ProfileQuota
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Profile != "work" {
+		t.Errorf("Profile = %q, want %q", out.Profile, "work")
+	}
+	if out.PlanTier != "max20" {
+		t.Errorf("PlanTier = %q, want %q", out.PlanTier, "max20")
+	}
+	if out.Window5h.Used != 142 || out.Window5h.Cap != 900 || out.Window5h.Pct != 15.78 {
+		t.Errorf("Window5h = %+v, want used=142 cap=900 pct=15.78", out.Window5h)
+	}
+	if out.WindowWeekly.Used != 1203 || out.WindowWeekly.Cap != 4500 || out.WindowWeekly.Pct != 26.73 {
+		t.Errorf("WindowWeekly = %+v, want used=1203 cap=4500 pct=26.73", out.WindowWeekly)
+	}
+}
+
+func TestRecommendationLevelConstants(t *testing.T) {
+	cases := []struct {
+		level contracts.RecommendationLevel
+		want  string
+	}{
+		{contracts.RecommendationWarn, "warn"},
+		{contracts.RecommendationSoft, "soft"},
+		{contracts.RecommendationHard, "hard"},
+	}
+	for _, tc := range cases {
+		if string(tc.level) != tc.want {
+			t.Errorf("level %v string = %q, want %q", tc.level, string(tc.level), tc.want)
+		}
+	}
+}
+
+func TestRecommendationEventJSON(t *testing.T) {
+	ts := time.Date(2026, 5, 24, 18, 42, 0, 0, time.UTC)
+	in := contracts.RecommendationEvent{
+		Profile:        "personal",
+		Level:          contracts.RecommendationSoft,
+		Reason:         "5h pressure 92%",
+		Suggested:      "work",
+		Quota5hPct:     92.0,
+		QuotaWeeklyPct: 41.5,
+		Timestamp:      ts,
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("Unmarshal fields: %v", err)
+	}
+	for _, name := range []string{"profile", "level", "reason", "suggested", "quota_5h_pct", "quota_weekly_pct", "timestamp"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled RecommendationEvent missing field %q in %s", name, data)
+		}
+	}
+	for _, name := range []string{"Profile", "Level", "Reason", "Suggested", "Quota5hPct", "QuotaWeeklyPct", "Timestamp"} {
+		if _, ok := fields[name]; ok {
+			t.Errorf("marshaled RecommendationEvent included Go field name %q in %s", name, data)
+		}
+	}
+
+	var out contracts.RecommendationEvent
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Reason != "5h pressure 92%" {
+		t.Errorf("Reason = %q, want %q", out.Reason, "5h pressure 92%")
+	}
+	if out.Suggested != "work" {
+		t.Errorf("Suggested = %q, want %q", out.Suggested, "work")
+	}
+	if out.Quota5hPct != 92.0 {
+		t.Errorf("Quota5hPct = %v, want 92", out.Quota5hPct)
+	}
+	if out.QuotaWeeklyPct != 41.5 {
+		t.Errorf("QuotaWeeklyPct = %v, want 41.5", out.QuotaWeeklyPct)
+	}
+	if out.Level != contracts.RecommendationSoft {
+		t.Errorf("Level = %q, want %q", out.Level, contracts.RecommendationSoft)
+	}
+	if !out.Timestamp.Equal(ts) {
+		t.Errorf("Timestamp = %v, want %v", out.Timestamp, ts)
+	}
+}
+
+func TestRecommendationEventSuggestedOmitEmpty(t *testing.T) {
+	in := contracts.RecommendationEvent{
+		Profile:   "personal",
+		Level:     contracts.RecommendationHard,
+		Reason:    "all siblings at hard cap",
+		Timestamp: time.Date(2026, 5, 24, 18, 42, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"suggested"`) {
+		t.Errorf("expected suggested to be omitted when empty; got %s", data)
 	}
 }
 

@@ -165,6 +165,45 @@ paths:
               schema:
                 $ref: "#/components/schemas/HeadroomResponse"
 
+  /api/quota:
+    get:
+      summary: Plan-aware per-profile quota usage
+      operationId: getQuota
+      description: |
+        Returns 5-hour-rolling and weekly turn counts for every profile.
+        Counts come from local hook telemetry (Stop and StopFailure events);
+        ccx does not query Anthropic for remaining quota.
+      parameters:
+        - in: query
+          name: profile
+          schema: { type: string }
+          description: Filter to one profile. Omit for all.
+      responses:
+        "200":
+          description: Per-profile quota windows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProfileQuota"
+
+  /api/recommendations/live:
+    get:
+      summary: Server-Sent Events stream of pressure-driven recommendations
+      operationId: getRecommendationsLive
+      description: |
+        Emits a `recommendation` event when the daemon detects a profile
+        crossing a pressure threshold (warn/soft/hard). The data payload is
+        a JSON-encoded RecommendationEvent.
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
 components:
   schemas:
     Profile:
@@ -313,6 +352,10 @@ components:
         tokens_24h:       { type: integer }
         tokens_7d:        { type: integer }
         usd_30d:          { type: number, format: double }
+        quota_5h:
+          $ref: "#/components/schemas/QuotaWindow"
+        quota_weekly:
+          $ref: "#/components/schemas/QuotaWindow"
 
     HeadroomResponse:
       type: object
@@ -326,3 +369,54 @@ components:
             $ref: "#/components/schemas/HeadroomCandidate"
         error:
           type: string
+
+    QuotaWindow:
+      type: object
+      required: [used, cap, pct, resets_at]
+      description: |
+        Turn usage within a single quota window. `cap` is 0 when the owning
+        profile has no plan_tier configured; in that case `pct` is also 0.
+      properties:
+        used:      { type: integer }
+        cap:       { type: integer }
+        pct:       { type: number, format: double }
+        resets_at: { type: string, format: date-time }
+
+    ProfileQuota:
+      type: object
+      required: [profile, plan_tier, window_5h, window_weekly]
+      properties:
+        profile:   { type: string }
+        plan_tier:
+          type: string
+          description: |
+            Empty string disables plan-aware tracking; otherwise one of
+            "pro", "max5", "max20", "api".
+        window_5h:
+          $ref: "#/components/schemas/QuotaWindow"
+        window_weekly:
+          $ref: "#/components/schemas/QuotaWindow"
+
+    RecommendationEvent:
+      type: object
+      required:
+        - profile
+        - level
+        - reason
+        - quota_5h_pct
+        - quota_weekly_pct
+        - timestamp
+      properties:
+        profile:   { type: string }
+        level:
+          type: string
+          enum: [warn, soft, hard]
+        reason:    { type: string }
+        suggested:
+          type: string
+          description: |
+            Recommended profile to switch to. Empty when no sibling has more
+            headroom than the crossed profile.
+        quota_5h_pct:     { type: number, format: double }
+        quota_weekly_pct: { type: number, format: double }
+        timestamp:        { type: string, format: date-time }
