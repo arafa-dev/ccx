@@ -165,6 +165,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/HeadroomResponse"
 
+  /api/quota:
+    get:
+      summary: Plan-aware per-profile quota usage
+      operationId: getQuota
+      description: |
+        Returns 5-hour-rolling and weekly turn counts for every profile.
+        Counts come from local hook telemetry (Stop and StopFailure events);
+        ccx does not query Anthropic for remaining quota.
+      parameters:
+        - in: query
+          name: profile
+          schema: { type: string }
+          description: Filter to one profile. Omit for all.
+      responses:
+        "200":
+          description: Per-profile quota windows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProfileQuota"
+
 components:
   schemas:
     Profile:
@@ -326,3 +349,30 @@ components:
             $ref: "#/components/schemas/HeadroomCandidate"
         error:
           type: string
+
+    QuotaWindow:
+      type: object
+      required: [used, cap, pct, resets_at]
+      description: |
+        Turn usage within a single quota window. `cap` is 0 when the owning
+        profile has no plan_tier configured; in that case `pct` is also 0.
+      properties:
+        used:      { type: integer }
+        cap:       { type: integer }
+        pct:       { type: number, format: double }
+        resets_at: { type: string, format: date-time }
+
+    ProfileQuota:
+      type: object
+      required: [profile, plan_tier, window_5h, window_weekly]
+      properties:
+        profile:   { type: string }
+        plan_tier:
+          type: string
+          description: |
+            Empty string disables plan-aware tracking; otherwise one of
+            "pro", "max5", "max20", "api".
+        window_5h:
+          $ref: "#/components/schemas/QuotaWindow"
+        window_weekly:
+          $ref: "#/components/schemas/QuotaWindow"
