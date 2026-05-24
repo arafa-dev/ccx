@@ -294,6 +294,8 @@ export interface components {
             tokens_7d: number;
             /** Format: double */
             usd_30d: number;
+            quota_5h?: components["schemas"]["QuotaWindow"];
+            quota_weekly?: components["schemas"]["QuotaWindow"];
         };
         HeadroomResponse: {
             recommendation?: components["schemas"]["HeadroomCandidate"];

@@ -352,6 +352,10 @@ components:
         tokens_24h:       { type: integer }
         tokens_7d:        { type: integer }
         usd_30d:          { type: number, format: double }
+        quota_5h:
+          $ref: "#/components/schemas/QuotaWindow"
+        quota_weekly:
+          $ref: "#/components/schemas/QuotaWindow"
 
     HeadroomResponse:
       type: object
