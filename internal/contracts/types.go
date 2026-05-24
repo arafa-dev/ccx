@@ -68,6 +68,33 @@ type ProfileQuota struct {
 	WindowWeekly QuotaWindow `json:"window_weekly"`
 }
 
+// RecommendationLevel categorizes the urgency of a streamed pressure-driven
+// recommendation. Thresholds (warn/soft/hard) are evaluator-defined.
+type RecommendationLevel string
+
+const (
+	// RecommendationWarn signals a profile crossed the early-warning threshold.
+	RecommendationWarn RecommendationLevel = "warn"
+	// RecommendationSoft signals a profile crossed the soft-penalty threshold.
+	RecommendationSoft RecommendationLevel = "soft"
+	// RecommendationHard signals a profile is at or above its hard cap.
+	RecommendationHard RecommendationLevel = "hard"
+)
+
+// RecommendationEvent is the payload emitted over /api/recommendations/live
+// when the daemon detects a profile crossing a pressure threshold and a
+// switch may be warranted. Suggested is empty when no sibling has more
+// headroom than the crossed profile.
+type RecommendationEvent struct {
+	Profile        string              `json:"profile"`
+	Level          RecommendationLevel `json:"level"`
+	Reason         string              `json:"reason"`
+	Suggested      string              `json:"suggested,omitempty"`
+	Quota5hPct     float64             `json:"quota_5h_pct"`
+	QuotaWeeklyPct float64             `json:"quota_weekly_pct"`
+	Timestamp      time.Time           `json:"timestamp"`
+}
+
 // DaemonStatus is the daemon's externally visible runtime state.
 type DaemonStatus struct {
 	PID             int       `json:"pid"`

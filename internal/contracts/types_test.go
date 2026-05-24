@@ -247,6 +247,93 @@ func TestProfileQuotaJSON(t *testing.T) {
 	}
 }
 
+func TestRecommendationLevelConstants(t *testing.T) {
+	cases := []struct {
+		level contracts.RecommendationLevel
+		want  string
+	}{
+		{contracts.RecommendationWarn, "warn"},
+		{contracts.RecommendationSoft, "soft"},
+		{contracts.RecommendationHard, "hard"},
+	}
+	for _, tc := range cases {
+		if string(tc.level) != tc.want {
+			t.Errorf("level %v string = %q, want %q", tc.level, string(tc.level), tc.want)
+		}
+	}
+}
+
+func TestRecommendationEventJSON(t *testing.T) {
+	ts := time.Date(2026, 5, 24, 18, 42, 0, 0, time.UTC)
+	in := contracts.RecommendationEvent{
+		Profile:        "personal",
+		Level:          contracts.RecommendationSoft,
+		Reason:         "5h pressure 92%",
+		Suggested:      "work",
+		Quota5hPct:     92.0,
+		QuotaWeeklyPct: 41.5,
+		Timestamp:      ts,
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("Unmarshal fields: %v", err)
+	}
+	for _, name := range []string{"profile", "level", "reason", "suggested", "quota_5h_pct", "quota_weekly_pct", "timestamp"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled RecommendationEvent missing field %q in %s", name, data)
+		}
+	}
+	for _, name := range []string{"Profile", "Level", "Reason", "Suggested", "Quota5hPct", "QuotaWeeklyPct", "Timestamp"} {
+		if _, ok := fields[name]; ok {
+			t.Errorf("marshaled RecommendationEvent included Go field name %q in %s", name, data)
+		}
+	}
+
+	var out contracts.RecommendationEvent
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Reason != "5h pressure 92%" {
+		t.Errorf("Reason = %q, want %q", out.Reason, "5h pressure 92%")
+	}
+	if out.Suggested != "work" {
+		t.Errorf("Suggested = %q, want %q", out.Suggested, "work")
+	}
+	if out.Quota5hPct != 92.0 {
+		t.Errorf("Quota5hPct = %v, want 92", out.Quota5hPct)
+	}
+	if out.QuotaWeeklyPct != 41.5 {
+		t.Errorf("QuotaWeeklyPct = %v, want 41.5", out.QuotaWeeklyPct)
+	}
+	if out.Level != contracts.RecommendationSoft {
+		t.Errorf("Level = %q, want %q", out.Level, contracts.RecommendationSoft)
+	}
+	if !out.Timestamp.Equal(ts) {
+		t.Errorf("Timestamp = %v, want %v", out.Timestamp, ts)
+	}
+}
+
+func TestRecommendationEventSuggestedOmitEmpty(t *testing.T) {
+	in := contracts.RecommendationEvent{
+		Profile:   "personal",
+		Level:     contracts.RecommendationHard,
+		Reason:    "all siblings at hard cap",
+		Timestamp: time.Date(2026, 5, 24, 18, 42, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"suggested"`) {
+		t.Errorf("expected suggested to be omitted when empty; got %s", data)
+	}
+}
+
 func TestTelemetryJSONUsesContractFieldNames(t *testing.T) {
 	ts := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	status := contracts.DaemonStatus{
