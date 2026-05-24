@@ -168,6 +168,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recommendations/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Server-Sent Events stream of pressure-driven recommendations
+         * @description Emits a `recommendation` event when the daemon detects a profile
+         *     crossing a pressure threshold (warn/soft/hard). The data payload is
+         *     a JSON-encoded RecommendationEvent.
+         *
+         */
+        get: operations["getRecommendationsLive"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -296,6 +319,22 @@ export interface components {
             plan_tier: string;
             window_5h: components["schemas"]["QuotaWindow"];
             window_weekly: components["schemas"]["QuotaWindow"];
+        };
+        RecommendationEvent: {
+            profile: string;
+            /** @enum {string} */
+            level: "warn" | "soft" | "hard";
+            reason: string;
+            /** @description Recommended profile to switch to. Empty when no sibling has more
+             *     headroom than the crossed profile.
+             *      */
+            suggested?: string;
+            /** Format: double */
+            quota_5h_pct: number;
+            /** Format: double */
+            quota_weekly_pct: number;
+            /** Format: date-time */
+            timestamp: string;
         };
     };
     responses: never;
@@ -510,6 +549,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileQuota"][];
+                };
+            };
+        };
+    };
+    getRecommendationsLive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
                 };
             };
         };

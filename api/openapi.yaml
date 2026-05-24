@@ -188,6 +188,22 @@ paths:
                 items:
                   $ref: "#/components/schemas/ProfileQuota"
 
+  /api/recommendations/live:
+    get:
+      summary: Server-Sent Events stream of pressure-driven recommendations
+      operationId: getRecommendationsLive
+      description: |
+        Emits a `recommendation` event when the daemon detects a profile
+        crossing a pressure threshold (warn/soft/hard). The data payload is
+        a JSON-encoded RecommendationEvent.
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
 components:
   schemas:
     Profile:
@@ -376,3 +392,27 @@ components:
           $ref: "#/components/schemas/QuotaWindow"
         window_weekly:
           $ref: "#/components/schemas/QuotaWindow"
+
+    RecommendationEvent:
+      type: object
+      required:
+        - profile
+        - level
+        - reason
+        - quota_5h_pct
+        - quota_weekly_pct
+        - timestamp
+      properties:
+        profile:   { type: string }
+        level:
+          type: string
+          enum: [warn, soft, hard]
+        reason:    { type: string }
+        suggested:
+          type: string
+          description: |
+            Recommended profile to switch to. Empty when no sibling has more
+            headroom than the crossed profile.
+        quota_5h_pct:     { type: number, format: double }
+        quota_weekly_pct: { type: number, format: double }
+        timestamp:        { type: string, format: date-time }
