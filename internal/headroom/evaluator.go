@@ -150,9 +150,9 @@ func (e Evaluator) evaluateProfile(ctx context.Context, p *contracts.Profile, no
 	}
 	failurePenalty := e.applyFailureGates(&c, p, failures, sessions, health, haveHealth, now, opts.IncludeUnavailable)
 
-	c.HeadroomPercent = headroomPercent(p.Limits, usage)
-	if hasBudget(p.Limits) {
-		c.Reasons = append(c.Reasons, budgetReasons(p.Limits, usage)...)
+	c.HeadroomPercent = headroomPercent(&p.Limits, usage)
+	if hasBudget(&p.Limits) {
+		c.Reasons = append(c.Reasons, budgetReasons(&p.Limits, usage)...)
 	} else {
 		c.Reasons = append(c.Reasons, "no explicit budgets; using recent usage heuristic")
 	}
@@ -291,7 +291,7 @@ func (e Evaluator) applyFailureGates(
 		failure := &failures[i]
 		switch failure.Error {
 		case "rate_limit":
-			cooldown := rateLimitCooldown(p.Limits)
+			cooldown := rateLimitCooldown(&p.Limits)
 			until := failure.Timestamp.Add(cooldown)
 			if now.Before(until) {
 				c.Available = false
@@ -360,7 +360,7 @@ func isAuthFailure(errorCode string) bool {
 	return errorCode == "authentication_failed" || errorCode == "oauth_org_not_allowed"
 }
 
-func rateLimitCooldown(limits contracts.ProfileLimits) time.Duration {
+func rateLimitCooldown(limits *contracts.ProfileLimits) time.Duration {
 	if limits.RateLimitCooldown == "" {
 		return defaultRateLimitCooldown
 	}
@@ -382,7 +382,7 @@ func authHealthPenalty(status string) float64 {
 	}
 }
 
-func headroomPercent(limits contracts.ProfileLimits, usage usageSummary) float64 {
+func headroomPercent(limits *contracts.ProfileLimits, usage usageSummary) float64 {
 	if !hasBudget(limits) {
 		return round2(clamp(100-(float64(usage.tokens24h)/1000), 0, 100))
 	}
@@ -400,11 +400,11 @@ func headroomPercent(limits contracts.ProfileLimits, usage usageSummary) float64
 	return round2(min(minHeadroom*100, 100))
 }
 
-func hasBudget(limits contracts.ProfileLimits) bool {
+func hasBudget(limits *contracts.ProfileLimits) bool {
 	return limits.DailyTokenBudget > 0 || limits.WeeklyTokenBudget > 0 || limits.MonthlyUSDBudget > 0
 }
 
-func budgetReasons(limits contracts.ProfileLimits, usage usageSummary) []string {
+func budgetReasons(limits *contracts.ProfileLimits, usage usageSummary) []string {
 	reasons := make([]string, 0, 3)
 	if limits.DailyTokenBudget > 0 {
 		reasons = append(reasons, fmt.Sprintf("daily tokens %d/%d", usage.tokens24h, limits.DailyTokenBudget))
