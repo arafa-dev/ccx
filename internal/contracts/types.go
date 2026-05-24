@@ -49,6 +49,25 @@ type ProfileLimits struct {
 	CapsWeeklyTurns int `json:"caps_weekly_turns,omitempty" toml:"caps_weekly_turns,omitempty"`
 }
 
+// QuotaWindow describes turn usage within a single quota window (rolling 5h
+// or weekly). Cap is zero when the owning profile has no PlanTier configured.
+type QuotaWindow struct {
+	Used     int       `json:"used"`
+	Cap      int       `json:"cap"`
+	Pct      float64   `json:"pct"`
+	ResetsAt time.Time `json:"resets_at"`
+}
+
+// ProfileQuota is the per-profile response shape returned by GET /api/quota.
+// Both windows are always present; their Cap field is zero when no plan tier
+// is configured for the profile.
+type ProfileQuota struct {
+	Profile      string      `json:"profile"`
+	PlanTier     string      `json:"plan_tier"`
+	Window5h     QuotaWindow `json:"window_5h"`
+	WindowWeekly QuotaWindow `json:"window_weekly"`
+}
+
 // DaemonStatus is the daemon's externally visible runtime state.
 type DaemonStatus struct {
 	PID             int       `json:"pid"`

@@ -145,6 +145,108 @@ func TestProfileLimitsPlanFieldsOmitEmpty(t *testing.T) {
 	}
 }
 
+func TestQuotaWindowJSON(t *testing.T) {
+	in := contracts.QuotaWindow{
+		Used:     142,
+		Cap:      900,
+		Pct:      15.78,
+		ResetsAt: time.Date(2026, 5, 24, 18, 42, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("Unmarshal fields: %v", err)
+	}
+	for _, name := range []string{"used", "cap", "pct", "resets_at"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled QuotaWindow missing field %q in %s", name, data)
+		}
+	}
+	for _, name := range []string{"Used", "Cap", "Pct", "ResetsAt"} {
+		if _, ok := fields[name]; ok {
+			t.Errorf("marshaled QuotaWindow included Go field name %q in %s", name, data)
+		}
+	}
+	var out contracts.QuotaWindow
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Used != 142 || out.Cap != 900 {
+		t.Errorf("counts: got used=%d cap=%d, want 142/900", out.Used, out.Cap)
+	}
+	if out.Pct != 15.78 {
+		t.Errorf("Pct = %v, want 15.78", out.Pct)
+	}
+	if !out.ResetsAt.Equal(in.ResetsAt) {
+		t.Errorf("ResetsAt: got %v, want %v", out.ResetsAt, in.ResetsAt)
+	}
+}
+
+func TestProfileQuotaJSON(t *testing.T) {
+	in := contracts.ProfileQuota{
+		Profile:      "work",
+		PlanTier:     "max20",
+		Window5h:     contracts.QuotaWindow{Used: 142, Cap: 900, Pct: 15.78},
+		WindowWeekly: contracts.QuotaWindow{Used: 1203, Cap: 4500, Pct: 26.73},
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("Unmarshal fields: %v", err)
+	}
+	for _, name := range []string{"profile", "plan_tier", "window_5h", "window_weekly"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("marshaled ProfileQuota missing field %q in %s", name, data)
+		}
+	}
+	for _, name := range []string{"Profile", "PlanTier", "Window5h", "WindowWeekly"} {
+		if _, ok := fields[name]; ok {
+			t.Errorf("marshaled ProfileQuota included Go field name %q in %s", name, data)
+		}
+	}
+	for fieldName, raw := range map[string]json.RawMessage{
+		"window_5h":     fields["window_5h"],
+		"window_weekly": fields["window_weekly"],
+	} {
+		var windowFields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &windowFields); err != nil {
+			t.Fatalf("Unmarshal %s fields: %v", fieldName, err)
+		}
+		for _, name := range []string{"used", "cap", "pct", "resets_at"} {
+			if _, ok := windowFields[name]; !ok {
+				t.Errorf("marshaled ProfileQuota.%s missing field %q in %s", fieldName, name, raw)
+			}
+		}
+		for _, name := range []string{"Used", "Cap", "Pct", "ResetsAt"} {
+			if _, ok := windowFields[name]; ok {
+				t.Errorf("marshaled ProfileQuota.%s included Go field name %q in %s", fieldName, name, raw)
+			}
+		}
+	}
+	var out contracts.ProfileQuota
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Profile != "work" {
+		t.Errorf("Profile = %q, want %q", out.Profile, "work")
+	}
+	if out.PlanTier != "max20" {
+		t.Errorf("PlanTier = %q, want %q", out.PlanTier, "max20")
+	}
+	if out.Window5h.Used != 142 || out.Window5h.Cap != 900 || out.Window5h.Pct != 15.78 {
+		t.Errorf("Window5h = %+v, want used=142 cap=900 pct=15.78", out.Window5h)
+	}
+	if out.WindowWeekly.Used != 1203 || out.WindowWeekly.Cap != 4500 || out.WindowWeekly.Pct != 26.73 {
+		t.Errorf("WindowWeekly = %+v, want used=1203 cap=4500 pct=26.73", out.WindowWeekly)
+	}
+}
+
 func TestTelemetryJSONUsesContractFieldNames(t *testing.T) {
 	ts := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	status := contracts.DaemonStatus{
