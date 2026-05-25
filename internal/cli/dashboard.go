@@ -69,6 +69,10 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			headroomStore, err := dashboardHeadroomStore(deps)
+			if err != nil {
+				return err
+			}
 
 			srv := server.New(server.Deps{
 				Store:    deps.Store,
@@ -76,7 +80,7 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 				Profiles: deps.Profiles,
 				WebRoot:  webFS,
 				Hooks:    &hooks.Service{Profiles: deps.Profiles},
-				Headroom: headroom.Evaluator{Store: deps.Store, Pricing: deps.Pricing},
+				Headroom: headroom.Evaluator{Store: headroomStore, Pricing: deps.Pricing},
 				Ingestor: dashboardHeadroomIngestor{deps: deps},
 				Quota:    quotaProvider,
 			}, opts.Build.Version)
@@ -117,6 +121,14 @@ func dashboardQuotaProvider(deps *Deps) (server.QuotaProvider, error) {
 		return nil, fmt.Errorf("dashboard quota provider requires *storage.Store, got %T", deps.Store)
 	}
 	return &quotawire.Adapter{Store: store, Profiles: deps.Profiles}, nil
+}
+
+func dashboardHeadroomStore(deps *Deps) (headroom.Store, error) {
+	store, ok := deps.Store.(headroom.Store)
+	if !ok {
+		return nil, fmt.Errorf("dashboard headroom requires headroom.Store, got %T", deps.Store)
+	}
+	return store, nil
 }
 
 type dashboardHeadroomIngestor struct {

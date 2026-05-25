@@ -209,7 +209,12 @@ func (s *Server) handleHeadroom(w http.ResponseWriter, r *http.Request) {
 	}
 	evaluator := s.deps.Headroom
 	if evaluator == nil {
-		evaluator = headroom.Evaluator{Store: s.deps.Store, Pricing: s.deps.Pricing}
+		headroomStore, ok := s.deps.Store.(headroom.Store)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("headroom requires headroom.Store, got %T", s.deps.Store))
+			return
+		}
+		evaluator = headroom.Evaluator{Store: headroomStore, Pricing: s.deps.Pricing}
 	}
 	result, err := evaluator.Evaluate(r.Context(), profiles, headroom.Options{
 		UnavailableReasons: unavailable,

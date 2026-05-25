@@ -42,8 +42,12 @@ func newSuggestCommand(_ *Options) *cobra.Command {
 				return err
 			}
 
+			headroomStore, err := suggestHeadroomStore(deps)
+			if err != nil {
+				return err
+			}
 			evaluator := headroom.Evaluator{
-				Store:   deps.Store,
+				Store:   headroomStore,
 				Pricing: deps.Pricing,
 			}
 			result, err := evaluator.Evaluate(ctx, profiles, headroom.Options{
