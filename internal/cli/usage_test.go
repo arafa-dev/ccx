@@ -65,3 +65,41 @@ func TestUsageIngestsEventsForRegisteredProfile(t *testing.T) {
 		t.Fatalf("usage output missing profile: %q", out)
 	}
 }
+
+func TestUsageQuotaFlagPrintsHeaders(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := filepath.Join(home, "claude-work")
+	if err := os.MkdirAll(filepath.Join(cfgDir, "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, "profile", "add", "work", "--config-dir", cfgDir)
+	runCLI(t, "profile", "set", "work", "--plan-tier", "max20")
+
+	out := runCLI(t, "usage", "--quota")
+	for _, want := range []string{"PROFILE", "PLAN", "5H WINDOW", "WEEKLY WINDOW"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected header %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestProfileSetPlanTierRejectsUnknownTier(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfgDir := filepath.Join(home, "claude-work")
+	if err := os.MkdirAll(filepath.Join(cfgDir, "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, "profile", "add", "work", "--config-dir", cfgDir)
+
+	stdout, stderr, code := runCLIResult([]string{"profile", "set", "work", "--plan-tier", "mxa20"})
+	if code == 0 {
+		t.Fatalf("profile set succeeded; stdout=%q stderr=%q", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "--plan-tier") {
+		t.Fatalf("stderr = %q, want --plan-tier validation error", stderr)
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
+	"github.com/arafa-dev/ccx/internal/quotawire"
+	"github.com/arafa-dev/ccx/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +20,7 @@ func newUsageCommand(_ *Options) *cobra.Command {
 		profileFlag string
 		since       string
 		asJSON      bool
+		showQuota   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "usage",
@@ -32,6 +35,9 @@ func newUsageCommand(_ *Options) *cobra.Command {
 
 			if err := ingestAllProfiles(ctx, deps); err != nil {
 				return fmt.Errorf("scanning: %w", err)
+			}
+			if showQuota {
+				return renderUsageQuota(ctx, deps, c.OutOrStdout(), c.ErrOrStderr(), profileFlag)
 			}
 
 			window, err := parseSince(since)
@@ -62,6 +68,7 @@ func newUsageCommand(_ *Options) *cobra.Command {
 	cmd.Flags().StringVar(&profileFlag, "profile", "", "limit to one profile (default: all)")
 	cmd.Flags().StringVar(&since, "since", "24h", "lookback window (e.g. 1d, 7d, 30d)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON output")
+	cmd.Flags().BoolVar(&showQuota, "quota", false, "show plan-aware quota windows alongside token usage")
 	return cmd
 }
 
@@ -209,6 +216,119 @@ func renderUsageTable(w io.Writer, rows []contracts.UsageRow, total float64, win
 	}
 	_, err := fmt.Fprintf(w, "\nTotal: $%.2f\n", total)
 	return err
+}
+
+func renderUsageQuota(ctx context.Context, deps *Deps, out, errOut io.Writer, profileFilter string) error {
+	profiles, err := deps.Profiles.List(ctx)
+	if err != nil {
+		return err
+	}
+	if profileFilter != "" {
+		profiles = filterProfiles(profiles, profileFilter)
+	}
+	quotaProvider, err := usageQuotaProvider(deps)
+	if err != nil {
+		return err
+	}
+	quotas, err := quotaProvider.Quota(ctx, profileFilter)
+	if err != nil {
+		return err
+	}
+	quotaByProfile := make(map[string]contracts.ProfileQuota, len(quotas))
+	for i := range quotas {
+		quotaByProfile[quotas[i].Profile] = quotas[i]
+	}
+
+	now := time.Now().UTC()
+	tokenRows, err := deps.Store.QueryUsage(ctx, contracts.UsageQuery{
+		Profile: profileFilter,
+		Range:   contracts.TimeRange{Start: now.Add(-24 * time.Hour), End: now},
+	})
+	if err != nil {
+		return fmt.Errorf("query 24h token usage: %w", err)
+	}
+	tokens24h := usageByProfile(tokenRows)
+
+	costRows, err := deps.Store.QueryUsage(ctx, contracts.UsageQuery{
+		Profile: profileFilter,
+		Range:   contracts.TimeRange{Start: now.Add(-30 * 24 * time.Hour), End: now},
+	})
+	if err != nil {
+		return fmt.Errorf("query 30d usage cost: %w", err)
+	}
+	_, pricingWarnings := priceUsageRows(costRows, deps.Pricing)
+	writePricingWarnings(errOut, pricingWarnings)
+	usd30d := costByProfile(costRows)
+
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "PROFILE\tPLAN\t5H WINDOW\tWEEKLY WINDOW\tTOKENS 24H\tUSD 30D")
+	for i := range profiles {
+		p := &profiles[i]
+		q := quotaByProfile[p.Name]
+		_, _ = fmt.Fprintf(
+			tw,
+			"%s\t%s\t%s\t%s\t%s\t$%.2f\n",
+			p.Name,
+			planTierLabel(q.PlanTier),
+			formatQuotaWindow(q.Window5h),
+			formatQuotaWindow(q.WindowWeekly),
+			humanCount(tokens24h[p.Name].TotalTokens()),
+			usd30d[p.Name],
+		)
+	}
+	return tw.Flush()
+}
+
+func usageQuotaProvider(deps *Deps) (*quotawire.Adapter, error) {
+	store, ok := deps.Store.(*storage.Store)
+	if !ok {
+		return nil, fmt.Errorf("usage quota requires *storage.Store, got %T", deps.Store)
+	}
+	return &quotawire.Adapter{Store: store, Profiles: deps.Profiles}, nil
+}
+
+func filterProfiles(profiles []contracts.Profile, profileFilter string) []contracts.Profile {
+	filtered := profiles[:0]
+	for i := range profiles {
+		if profiles[i].Name == profileFilter {
+			filtered = append(filtered, profiles[i])
+		}
+	}
+	return filtered
+}
+
+func usageByProfile(rows []contracts.UsageRow) map[string]contracts.Usage {
+	out := map[string]contracts.Usage{}
+	for _, row := range rows {
+		out[row.Profile] = out[row.Profile].Add(row.Usage)
+	}
+	return out
+}
+
+func costByProfile(rows []contracts.UsageRow) map[string]float64 {
+	out := map[string]float64{}
+	for _, row := range rows {
+		out[row.Profile] += row.EstimatedUSD
+	}
+	return out
+}
+
+func planTierLabel(planTier string) string {
+	if planTier == "" {
+		return "-"
+	}
+	return planTier
+}
+
+func formatQuotaWindow(w contracts.QuotaWindow) string {
+	if w.Cap == 0 {
+		return "-"
+	}
+	suffix := ""
+	if w.Pct >= 100 {
+		suffix = " ⛔"
+	}
+	return fmt.Sprintf("%d/%d (%.0f%%)%s", w.Used, w.Cap, w.Pct, suffix)
 }
 
 func humanTokens(u contracts.Usage) string {

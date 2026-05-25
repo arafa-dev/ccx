@@ -32,6 +32,7 @@ func newProfileCommand(_ *Options) *cobra.Command {
 func newProfileSetCmd() *cobra.Command {
 	var (
 		label, color, suggestions, rateLimitCooldown string
+		planTier                                     string
 		dailyTokens, weeklyTokens, priority          int
 		monthlyUSD                                   float64
 		asJSON                                       bool
@@ -72,6 +73,13 @@ func newProfileSetCmd() *cobra.Command {
 				if flags.Changed("rate-limit-cooldown") {
 					p.Limits.RateLimitCooldown = rateLimitCooldown
 				}
+				if flags.Changed("plan-tier") {
+					tier, err := parsePlanTier(planTier)
+					if err != nil {
+						return err
+					}
+					p.Limits.PlanTier = tier
+				}
 				if flags.Changed("suggestions") {
 					enabled, err := parseSuggestionState(suggestions)
 					if err != nil {
@@ -102,8 +110,19 @@ func newProfileSetCmd() *cobra.Command {
 	cmd.Flags().IntVar(&priority, "priority", 0, "suggestion priority")
 	cmd.Flags().StringVar(&suggestions, "suggestions", "", "suggestion eligibility: enabled or disabled")
 	cmd.Flags().StringVar(&rateLimitCooldown, "rate-limit-cooldown", "", "rate-limit cooldown duration; pass an empty value to clear")
+	cmd.Flags().StringVar(&planTier, "plan-tier", "", "subscription plan tier: pro, max5, max20, api, or empty to clear")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON output")
 	return cmd
+}
+
+func parsePlanTier(value string) (string, error) {
+	tier := strings.ToLower(strings.TrimSpace(value))
+	switch tier {
+	case "", "pro", "max5", "max20", "api":
+		return tier, nil
+	default:
+		return "", fmt.Errorf("--plan-tier must be one of: pro, max5, max20, api")
+	}
 }
 
 func parseSuggestionState(value string) (bool, error) {
