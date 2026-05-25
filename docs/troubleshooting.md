@@ -137,13 +137,57 @@ Common reasons:
 `ccx suggest` is advisory: it prints a suggested `ccx use <name>` command but
 does not switch accounts automatically.
 
-## `ccx run --supervise` did not swap immediately
+## The quota panel is empty
+
+The quota panel is driven by local Claude Code `Stop` hook events, not by JSONL
+token entries alone. Check that hooks are installed and enabled for the profile:
+
+```bash
+ccx hooks status --profile work
+ccx hooks install --profile work
+```
+
+Then complete one Claude turn under that profile and refresh the dashboard. If
+the daemon is serving the dashboard, restart it after changing profile settings:
+
+```bash
+ccx daemon restart
+```
+
+## Supervisor didn't swap when I expected
 
 The supervisor waits for Claude Code's next `Stop` hook before relaunching, so
 the active turn can finish cleanly. By default ccx polls local hook telemetry
 every 2 seconds; this can delay the swap by up to one poll interval after the
 hook lands. Lower `--poll-interval` only if you need tighter feedback, and keep
 it above 250ms to avoid hammering SQLite.
+
+If it still does not swap, check that:
+
+- The daemon is running; `ccx run --supervise` can run without daemon SSE, but
+  live threshold events are degraded to local polling.
+- At least one other profile is available in `ccx suggest --json`.
+- Hooks are installed for the active profile, because the supervisor swaps only
+  after a local `Stop` event identifies the resumable session.
+- Existing profiles have shared history enabled. Run
+  `ccx migrate-shared-history --dry-run` before using supervisor mode across
+  older profiles.
+
+## I changed plan tier and the cap didn't update
+
+`ccx profile set <name> --plan-tier ...` updates the profile registry
+immediately, but a running daemon keeps its in-memory profile list until it is
+restarted. Restart it and refresh the dashboard:
+
+```bash
+ccx daemon restart
+ccx usage --quota --profile <name>
+```
+
+Explicit cap overrides win over tier defaults. If a profile still shows an old
+cap, inspect `~/.ccx/profiles.toml` for `caps_5h_turns` or
+`caps_weekly_turns`, then clear or replace the override with
+`ccx profile set`.
 
 ## Cost numbers look wrong
 

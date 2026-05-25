@@ -123,6 +123,44 @@ ccx suggest --json
 hook failures, cooldowns, and priority. It prints a suggested `ccx use <name>`
 command; it does not switch accounts automatically.
 
+## Plan-aware quota
+
+ccx v0.2 adds quota windows for Claude plan tiers. Configure each profile with
+its plan tier and optional caps:
+
+```bash
+ccx profile set personal --plan-tier pro
+ccx profile set max-work --plan-tier max5 --caps-5h-turns 225 --caps-weekly-turns 900
+```
+
+Hook telemetry counts completed turns from local `Stop` events, so
+`ccx usage --quota` and the dashboard quota panel can show 5-hour and weekly
+pressure without proxying Claude traffic.
+
+```bash
+ccx usage --quota
+ccx dashboard --daemon
+```
+
+Suggestions are pressure-aware. Near a soft or hard cap, `ccx suggest` lowers a
+profile's score or marks it unavailable, and `ccx run` can pick a healthier
+profile before launching Claude:
+
+```bash
+ccx run -- claude -p "summarize this repo"
+ccx run --supervise -- claude
+```
+
+`ccx run --supervise` waits for a completed turn, then relaunches Claude with
+`--resume <session-id>` if the daemon reports a better profile. For continuity,
+new profiles link their `projects/` directory to `~/.ccx/shared-projects/`.
+Existing profiles can opt in safely with a dry run first:
+
+```bash
+ccx migrate-shared-history --dry-run
+ccx migrate-shared-history
+```
+
 ## Comparison
 
 | Capability | **ccx** | ccusage | claude-account-switcher | ccs |
