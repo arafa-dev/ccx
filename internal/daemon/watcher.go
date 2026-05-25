@@ -27,13 +27,14 @@ type profileWatcher struct {
 	projectsDirs map[string]string
 	watched      map[string]struct{}
 	timers       map[string]*time.Timer
+	afterIngest  func(context.Context)
 }
 
-func runProfileWatcher(ctx context.Context, deps *runtimeDeps, logger *log.Logger, pollInterval time.Duration) {
+func runProfileWatcher(ctx context.Context, deps *runtimeDeps, logger *log.Logger, pollInterval time.Duration, afterIngest func(context.Context)) {
 	fsWatcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		logger.Printf("watcher unavailable: %v", err)
-		runPollingFallback(ctx, deps, logger, pollInterval)
+		runPollingFallback(ctx, deps, logger, pollInterval, afterIngest)
 		return
 	}
 	defer func() { _ = fsWatcher.Close() }()
@@ -47,6 +48,7 @@ func runProfileWatcher(ctx context.Context, deps *runtimeDeps, logger *log.Logge
 		projectsDirs: map[string]string{},
 		watched:      map[string]struct{}{},
 		timers:       map[string]*time.Timer{},
+		afterIngest:  afterIngest,
 	}
 	w.refreshProfiles(ctx)
 	w.scanner = newScanWorker(ctx, w.scanAll, w.scanProfile)
@@ -77,7 +79,7 @@ func runProfileWatcher(ctx context.Context, deps *runtimeDeps, logger *log.Logge
 	}
 }
 
-func runPollingFallback(ctx context.Context, deps *runtimeDeps, logger *log.Logger, pollInterval time.Duration) {
+func runPollingFallback(ctx context.Context, deps *runtimeDeps, logger *log.Logger, pollInterval time.Duration, afterIngest func(context.Context)) {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -87,7 +89,9 @@ func runPollingFallback(ctx context.Context, deps *runtimeDeps, logger *log.Logg
 		case <-ticker.C:
 			if _, err := ingestAllProfiles(ctx, deps); err != nil {
 				logger.Printf("poll ingest failed: %v", err)
+				continue
 			}
+			callAfterIngest(ctx, afterIngest)
 		}
 	}
 }
@@ -255,7 +259,9 @@ func (w *profileWatcher) schedule(profileName string) {
 func (w *profileWatcher) scanAll(ctx context.Context) {
 	if _, err := ingestAllProfiles(ctx, w.deps); err != nil {
 		w.logger.Printf("poll ingest failed: %v", err)
+		return
 	}
+	callAfterIngest(ctx, w.afterIngest)
 }
 
 func (w *profileWatcher) scanProfile(ctx context.Context, profileName string) {
@@ -273,7 +279,9 @@ func (w *profileWatcher) scanProfile(ctx context.Context, profileName string) {
 	}
 	if err := ingestProfile(ctx, w.deps, p); err != nil {
 		w.logger.Printf("watch ingest profile=%s failed: %v", profileName, err)
+		return
 	}
+	callAfterIngest(ctx, w.afterIngest)
 }
 
 func (w *profileWatcher) stopTimers() {
@@ -283,6 +291,12 @@ func (w *profileWatcher) stopTimers() {
 		timer.Stop()
 	}
 	w.timers = map[string]*time.Timer{}
+}
+
+func callAfterIngest(ctx context.Context, afterIngest func(context.Context)) {
+	if afterIngest != nil {
+		afterIngest(ctx)
+	}
 }
 
 type scanWorker struct {

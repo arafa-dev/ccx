@@ -16,7 +16,9 @@ import (
 	"github.com/arafa-dev/ccx/internal/headroom"
 	"github.com/arafa-dev/ccx/internal/hooks"
 	"github.com/arafa-dev/ccx/internal/platform"
+	"github.com/arafa-dev/ccx/internal/quota"
 	"github.com/arafa-dev/ccx/internal/quotawire"
+	"github.com/arafa-dev/ccx/internal/recstream"
 	"github.com/arafa-dev/ccx/internal/server"
 )
 
@@ -104,6 +106,15 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if err != nil {
 		return fmt.Errorf("initial ingest: %w", err)
 	}
+	recommendations := recstream.NewHub()
+	defer recommendations.Close()
+	recommendationState := recstream.NewStateMachine()
+	quotaComputer := quota.Computer{Store: deps.Store}
+	headroomEvaluator := headroom.Evaluator{Store: deps.Store, Pricing: deps.Pricing}
+	observeRecommendations := func(ctx context.Context) {
+		observePressure(ctx, deps, quotaComputer, headroomEvaluator, recommendationState, recommendations, logger)
+	}
+	primePressure(runCtx, deps, quotaComputer, recommendationState, logger)
 
 	webFS, err := dashboard.FS()
 	if err != nil {
@@ -111,14 +122,15 @@ func Run(ctx context.Context, opts RunOptions) error {
 	}
 	statusProvider := &currentStatusProvider{}
 	srv := server.New(server.Deps{
-		Store:    deps.Store,
-		Pricing:  deps.Pricing,
-		Profiles: deps.Profiles,
-		WebRoot:  webFS,
-		Daemon:   statusProvider,
-		Hooks:    &hooks.Service{Profiles: deps.Profiles},
-		Headroom: headroom.Evaluator{Store: deps.Store, Pricing: deps.Pricing},
-		Quota:    &quotawire.Adapter{Store: deps.Store, Profiles: deps.Profiles},
+		Store:           deps.Store,
+		Pricing:         deps.Pricing,
+		Profiles:        deps.Profiles,
+		WebRoot:         webFS,
+		Daemon:          statusProvider,
+		Hooks:           &hooks.Service{Profiles: deps.Profiles},
+		Headroom:        headroomEvaluator,
+		Quota:           &quotawire.Adapter{Store: deps.Store, Profiles: deps.Profiles},
+		Recommendations: recommendations,
 	}, opts.Version)
 
 	startPort, endPort := defaultStartPort, defaultEndPort
@@ -159,7 +171,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 	watcherDone := make(chan struct{})
 	go func() {
 		defer close(watcherDone)
-		runProfileWatcher(runCtx, deps, logger, poll)
+		runProfileWatcher(runCtx, deps, logger, poll, observeRecommendations)
 	}()
 
 	err = runServer()

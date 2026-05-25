@@ -3,14 +3,22 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"path/filepath"
+	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
+	"github.com/arafa-dev/ccx/internal/headroom"
 	"github.com/arafa-dev/ccx/internal/pricing"
 	"github.com/arafa-dev/ccx/internal/profile"
+	"github.com/arafa-dev/ccx/internal/quota"
+	"github.com/arafa-dev/ccx/internal/recstream"
 	"github.com/arafa-dev/ccx/internal/scanner"
 	"github.com/arafa-dev/ccx/internal/storage"
 )
+
+var discardLogger = log.New(io.Discard, "", 0)
 
 type runtimeDeps struct {
 	Store    *storage.Store
@@ -127,4 +135,122 @@ func ingestProfile(ctx context.Context, deps *runtimeDeps, p contracts.Profile) 
 		}
 	}
 	return scanErr
+}
+
+func observePressure(
+	ctx context.Context,
+	deps *runtimeDeps,
+	computer quota.Computer,
+	evaluator headroom.Evaluator,
+	sm *recstream.StateMachine,
+	hub *recstream.Hub,
+	logger *log.Logger,
+) {
+	logger = nonNilLogger(logger)
+	if deps == nil || deps.Profiles == nil || sm == nil || hub == nil {
+		return
+	}
+	profiles, err := deps.Profiles.List(ctx)
+	if err != nil {
+		logger.Printf("recstream: list profiles: %v", err)
+		return
+	}
+	for i := range profiles {
+		p := profiles[i]
+		if p.Limits.PlanTier == "" {
+			continue
+		}
+		pq, err := computer.For(ctx, p)
+		if err != nil {
+			logger.Printf("recstream: quota for %q: %v", p.Name, err)
+			continue
+		}
+		worstPct := pq.Window5h.Pct
+		if pq.WindowWeekly.Pct > worstPct {
+			worstPct = pq.WindowWeekly.Pct
+		}
+		emit, level := sm.Observe(p.Name, worstPct)
+		if !emit {
+			continue
+		}
+		hub.Publish(contracts.RecommendationEvent{
+			Profile:        p.Name,
+			Level:          level,
+			Reason:         fmt.Sprintf("%s pressure %.0f%%", level, worstPct),
+			Suggested:      bestSibling(ctx, evaluator, profiles, p.Name, logger),
+			Quota5hPct:     pq.Window5h.Pct,
+			QuotaWeeklyPct: pq.WindowWeekly.Pct,
+			Timestamp:      time.Now().UTC(),
+		})
+	}
+}
+
+func primePressure(
+	ctx context.Context,
+	deps *runtimeDeps,
+	computer quota.Computer,
+	sm *recstream.StateMachine,
+	logger *log.Logger,
+) {
+	logger = nonNilLogger(logger)
+	if deps == nil || deps.Profiles == nil || sm == nil {
+		return
+	}
+	profiles, err := deps.Profiles.List(ctx)
+	if err != nil {
+		logger.Printf("recstream: list profiles: %v", err)
+		return
+	}
+	for i := range profiles {
+		p := profiles[i]
+		if p.Limits.PlanTier == "" {
+			continue
+		}
+		pq, err := computer.For(ctx, p)
+		if err != nil {
+			logger.Printf("recstream: quota for %q: %v", p.Name, err)
+			continue
+		}
+		worstPct := pq.Window5h.Pct
+		if pq.WindowWeekly.Pct > worstPct {
+			worstPct = pq.WindowWeekly.Pct
+		}
+		sm.Observe(p.Name, worstPct)
+	}
+}
+
+func bestSibling(
+	ctx context.Context,
+	evaluator headroom.Evaluator,
+	profiles []contracts.Profile,
+	exclude string,
+	logger *log.Logger,
+) string {
+	logger = nonNilLogger(logger)
+	siblings := make([]contracts.Profile, 0, len(profiles))
+	for i := range profiles {
+		if profiles[i].Name == exclude {
+			continue
+		}
+		siblings = append(siblings, profiles[i])
+	}
+	if len(siblings) == 0 {
+		return ""
+	}
+	result, err := evaluator.Evaluate(ctx, siblings, headroom.Options{})
+	if err != nil {
+		logger.Printf("recstream: sibling evaluator for %q: %v", exclude, err)
+		return ""
+	}
+	if result.Recommendation == nil {
+		return ""
+	}
+	return result.Recommendation.Profile
+}
+
+func nonNilLogger(logger *log.Logger) *log.Logger {
+	if logger != nil {
+		return logger
+	}
+	return discardLogger
 }

@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
 	"github.com/arafa-dev/ccx/internal/profile"
+	"github.com/arafa-dev/ccx/internal/storage"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -153,6 +155,63 @@ func TestScanWorkerStopWaitsForActiveScan(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("worker did not stop after active scan completed")
 	}
+}
+
+func TestProfileWatcherRunsAfterIngestForScanPaths(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.NewStore(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	mgr, err := profile.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	p := contracts.Profile{Name: "work", ConfigDir: t.TempDir()}
+	if err := mgr.Add(ctx, p); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	var calls atomic.Int64
+	w := &profileWatcher{
+		deps: &runtimeDeps{
+			Store:    store,
+			Profiles: mgr,
+			Scanner:  emptyScanner{},
+		},
+		logger:   log.New(io.Discard, "", 0),
+		profiles: map[string]contracts.Profile{},
+		afterIngest: func(context.Context) {
+			calls.Add(1)
+		},
+	}
+
+	w.scanAll(ctx)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("after scanAll calls = %d, want 1", got)
+	}
+
+	w.profiles = map[string]contracts.Profile{
+		"work": p,
+	}
+	w.scanProfile(ctx, "work")
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("after scanProfile calls = %d, want 2", got)
+	}
+}
+
+type emptyScanner struct{}
+
+func (emptyScanner) Scan(context.Context, contracts.Profile) (<-chan contracts.Event, <-chan error) {
+	events := make(chan contracts.Event)
+	errs := make(chan error)
+	close(events)
+	close(errs)
+	return events, errs
 }
 
 type scanWorkerStats struct {
