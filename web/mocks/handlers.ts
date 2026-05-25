@@ -12,6 +12,41 @@ import {
 const configuredBase = process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, '');
 const apiRoute = (path: string) => (configuredBase ? `${configuredBase}${path}` : `*${path}`);
 
+const FIXTURE_QUOTAS = [
+  {
+    profile: 'work',
+    plan_tier: 'max20',
+    window_5h: {
+      used: 142,
+      cap: 900,
+      pct: 15.78,
+      resets_at: new Date(Date.now() + 3_600_000).toISOString(),
+    },
+    window_weekly: {
+      used: 1203,
+      cap: 4500,
+      pct: 26.73,
+      resets_at: new Date(Date.now() + 24 * 3_600_000).toISOString(),
+    },
+  },
+  {
+    profile: 'personal',
+    plan_tier: 'pro',
+    window_5h: {
+      used: 45,
+      cap: 45,
+      pct: 100,
+      resets_at: new Date(Date.now() + 1_200_000).toISOString(),
+    },
+    window_weekly: {
+      used: 0,
+      cap: 0,
+      pct: 0,
+      resets_at: new Date(0).toISOString(),
+    },
+  },
+];
+
 export const handlers = [
   http.get(apiRoute('/api/health'), () =>
     HttpResponse.json({ ok: true, version: '0.1.0-dev-msw' }),
@@ -67,4 +102,13 @@ export const handlers = [
   }),
 
   http.get(apiRoute('/api/headroom'), () => HttpResponse.json(FIXTURE_HEADROOM)),
+
+  http.get(apiRoute('/api/quota'), ({ request }) => {
+    const url = new URL(request.url);
+    const profile = url.searchParams.get('profile');
+    const rows = profile
+      ? FIXTURE_QUOTAS.filter((row) => row.profile === profile)
+      : FIXTURE_QUOTAS;
+    return HttpResponse.json(rows);
+  }),
 ];

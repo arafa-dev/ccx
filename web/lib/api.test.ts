@@ -5,6 +5,7 @@ import {
   getHeadroom,
   getHealth,
   getHooksStatus,
+  getQuota,
   getProfiles,
   getSessions,
   getUsage,
@@ -215,6 +216,40 @@ describe('api client', () => {
 
     const out = await getHeadroom();
     expect(out.recommendation?.profile).toBe('work');
+  });
+
+  it('getQuota forwards filters and parses quota windows', async () => {
+    const spy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      expect(url).toContain('/api/quota');
+      expect(url).toContain('profile=work');
+      return new Response(
+        JSON.stringify([
+          {
+            profile: 'work',
+            plan_tier: 'max20',
+            window_5h: {
+              used: 142,
+              cap: 900,
+              pct: 15.78,
+              resets_at: '2026-05-24T19:00:00Z',
+            },
+            window_weekly: {
+              used: 1203,
+              cap: 4500,
+              pct: 26.73,
+              resets_at: '2026-05-31T00:00:00Z',
+            },
+          },
+        ]),
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    global.fetch = spy as unknown as typeof fetch;
+
+    const out = await getQuota({ profile: 'work' });
+    expect(out[0]?.profile).toBe('work');
+    expect(out[0]?.window_5h.cap).toBe(900);
   });
 
   it('throws on non-2xx with a useful message', async () => {
