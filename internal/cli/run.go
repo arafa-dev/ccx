@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newRunCommand(_ *Options) *cobra.Command {
+func newRunCommand(opts *Options) *cobra.Command {
 	var (
 		overrideProfile string
 		binaryOverride  string
@@ -43,7 +43,7 @@ func newRunCommand(_ *Options) *cobra.Command {
 				return fmt.Errorf("no profiles registered; run `ccx profile add` first")
 			}
 
-			scanFailures, err := ingestSuggestProfiles(ctx, deps, profiles)
+			scanFailures, err := runScanFailures(ctx, opts, deps, profiles, overrideProfile)
 			if err != nil {
 				return err
 			}
@@ -71,7 +71,7 @@ func newRunCommand(_ *Options) *cobra.Command {
 			}
 
 			if !quiet {
-				_, _ = fmt.Fprintf(c.ErrOrStderr(), "ccx: %s -> profile=%s config_dir=%s\n", why, profile.Name, profile.ConfigDir)
+				_, _ = fmt.Fprintf(c.ErrOrStderr(), "ccx: %s -> profile=%s\n", why, profile.Name)
 			}
 
 			binary, err := run.LocateClaude(run.Options{BinaryPath: binaryOverride})
@@ -117,6 +117,20 @@ func newRunCommand(_ *Options) *cobra.Command {
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "suppress profile selection rationale")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "print extra launch detail")
 	return cmd
+}
+
+func runScanFailures(ctx context.Context, opts *Options, deps *Deps, profiles []contracts.Profile, overrideProfile string) (map[string]string, error) {
+	if overrideProfile != "" {
+		return map[string]string{}, nil
+	}
+	status, err := daemonController(opts).Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if status.Running {
+		return map[string]string{}, nil
+	}
+	return ingestSuggestProfiles(ctx, deps, profiles)
 }
 
 type evaluatorAdapter struct {

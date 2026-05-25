@@ -67,15 +67,20 @@ func BuildEnv(p contracts.Profile, base []string) []string {
 	return env
 }
 
-// Launch starts the configured child process and returns its exit code.
+// Launch starts the configured child process and returns its exit code. The
+// context is checked before launch; OS signals are forwarded explicitly so an
+// interactive child can handle Ctrl-C/SIGTERM and choose its own exit status.
 //
 //nolint:gocritic // The value signature is the public API for this package.
 func Launch(ctx context.Context, spec LaunchSpec) (int, error) {
 	if spec.BinaryPath == "" {
 		return 0, errors.New("launching claude: empty binary path")
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 
-	cmd := exec.CommandContext(ctx, spec.BinaryPath, spec.Args...) //nolint:gosec // Launching the selected claude binary is this package's purpose.
+	cmd := exec.Command(spec.BinaryPath, spec.Args...) //nolint:gosec // Launching the selected claude binary is this package's purpose.
 	cmd.Env = spec.Env
 	cmd.Stdin = spec.Stdin
 	if cmd.Stdin == nil {

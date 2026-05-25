@@ -2,9 +2,14 @@ package run_test
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
 	"github.com/arafa-dev/ccx/internal/run"
@@ -96,4 +101,71 @@ func TestLaunchReturnsExitCodeOfChild(t *testing.T) {
 	if exit != 7 {
 		t.Errorf("exit code: got %d, want 7", exit)
 	}
+}
+
+func TestLaunchForwardsInterruptWithoutKillingChildContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("posix-only test")
+	}
+
+	dir := t.TempDir()
+	ready := filepath.Join(dir, "ready")
+	trapped := filepath.Join(dir, "trapped")
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	result := make(chan struct {
+		exit int
+		err  error
+	}, 1)
+	go func() {
+		exit, err := run.Launch(ctx, run.LaunchSpec{
+			BinaryPath: "/bin/sh",
+			Args: []string{
+				"-c",
+				fmt.Sprintf("trap 'echo trapped > %q; sleep 0.2; exit 42' INT; touch %q; while true; do sleep 1; done", trapped, ready),
+			},
+			Env: []string{"PATH=/usr/bin:/bin"},
+		})
+		result <- struct {
+			exit int
+			err  error
+		}{exit: exit, err: err}
+	}()
+
+	waitForFile(t, ready)
+	proc, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("FindProcess: %v", err)
+	}
+	if err := proc.Signal(os.Interrupt); err != nil {
+		t.Fatalf("signal self: %v", err)
+	}
+
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("Launch returned error: %v", got.err)
+		}
+		if got.exit != 42 {
+			t.Fatalf("exit code = %d, want child trap exit 42", got.exit)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Launch did not return after forwarded interrupt")
+	}
+	if _, err := os.Stat(trapped); err != nil {
+		t.Fatalf("child trap file missing: %v", err)
+	}
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", path)
 }
