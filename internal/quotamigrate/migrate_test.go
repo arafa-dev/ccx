@@ -3,6 +3,7 @@ package quotamigrate_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
@@ -106,7 +107,8 @@ func TestApplyExecutesPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected moved file: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o640 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
+		got := info.Mode().Perm()
 		t.Errorf("moved file mode: got %v, want %v", got, os.FileMode(0o640))
 	}
 }
