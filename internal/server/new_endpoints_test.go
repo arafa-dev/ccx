@@ -16,6 +16,7 @@ import (
 	"github.com/arafa-dev/ccx/internal/headroom"
 	"github.com/arafa-dev/ccx/internal/hooks"
 	"github.com/arafa-dev/ccx/internal/server"
+	"github.com/arafa-dev/ccx/internal/storage"
 )
 
 func TestDaemonStatusEndpointFallsBackToForegroundWithoutProvider(t *testing.T) {
@@ -313,6 +314,89 @@ func TestHeadroomEndpointReturnsRecommendationAndUnavailableCandidates(t *testin
 	badIdx := slices.IndexFunc(body.Candidates, func(c headroom.Candidate) bool { return c.Profile == "bad" })
 	if badIdx < 0 || body.Candidates[badIdx].Available {
 		t.Fatalf("bad candidate = %+v, want present and unavailable", body.Candidates)
+	}
+}
+
+func TestHeadroomEndpointIncludesQuotaWhenPlanTierSet(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	store, err := storage.NewStore(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	})
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	profile := contracts.Profile{
+		Name:       "work",
+		ConfigDir:  t.TempDir(),
+		CreatedAt:  now,
+		LastUsedAt: now,
+		Limits: contracts.ProfileLimits{
+			PlanTier: "max20",
+		},
+	}
+	if err := store.SaveProfile(ctx, profile); err != nil {
+		t.Fatalf("SaveProfile: %v", err)
+	}
+	if err := store.InsertHookEvent(ctx, profile.Name, contracts.HookEvent{
+		Profile:   profile.Name,
+		Session:   "session-1",
+		Event:     "Stop",
+		Timestamp: now.Add(-30 * time.Minute),
+	}); err != nil {
+		t.Fatalf("InsertHookEvent: %v", err)
+	}
+
+	profiles := mockProfiles{profiles: []contracts.Profile{profile}}
+	srv := server.New(server.Deps{
+		Store:    store,
+		Pricing:  &mockPricing{},
+		Profiles: profiles,
+		Headroom: headroom.Evaluator{
+			Store:          store,
+			Pricing:        &mockPricing{},
+			Now:            func() time.Time { return now },
+			CheckConfigDir: func(string) error { return nil },
+		},
+	}, "test")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	res, err := ts.Client().Get(ts.URL + "/api/headroom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusOK)
+	}
+	var body headroom.Result
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	idx := slices.IndexFunc(body.Candidates, func(c headroom.Candidate) bool { return c.Profile == profile.Name })
+	if idx < 0 {
+		t.Fatalf("candidates = %+v, want %q", body.Candidates, profile.Name)
+	}
+	candidate := body.Candidates[idx]
+	if candidate.Quota5h == nil {
+		t.Fatalf("quota_5h missing from candidate: %+v", candidate)
+	}
+	if candidate.Quota5h.Used != 1 || candidate.Quota5h.Cap != 900 {
+		t.Fatalf("quota_5h = %+v, want 1/900", candidate.Quota5h)
+	}
+	if candidate.QuotaWeekly == nil {
+		t.Fatalf("quota_weekly missing from candidate: %+v", candidate)
+	}
+	if candidate.QuotaWeekly.Used != 1 || candidate.QuotaWeekly.Cap != 0 {
+		t.Fatalf("quota_weekly = %+v, want 1/0 default uncapped weekly quota", candidate.QuotaWeekly)
 	}
 }
 
