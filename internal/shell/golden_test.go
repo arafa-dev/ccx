@@ -1,6 +1,7 @@
 package shell_test
 
 import (
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -67,6 +68,69 @@ func TestEmitInitScriptGolden(t *testing.T) {
 	}
 }
 
+func TestEmitClaudeWrapperGolden(t *testing.T) {
+	cases := []struct {
+		name   string
+		got    string
+		golden string
+	}{
+		{"posix", shell.EmitClaudeWrapperPosix(), "claude_wrapper_posix.txt"},
+		{"fish", shell.EmitClaudeWrapperFish(), "claude_wrapper_fish.txt"},
+		{"pwsh", shell.EmitClaudeWrapperPowerShell(), "claude_wrapper_pwsh.txt"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			compareGolden(t, tc.golden, tc.got)
+		})
+	}
+}
+
+func TestEmitInitScriptWithClaudeGolden(t *testing.T) {
+	cases := []struct {
+		shell         contracts.Shell
+		initGolden    string
+		wrapperGolden string
+	}{
+		{contracts.ShellZsh, "init_zsh.txt", "claude_wrapper_posix.txt"},
+		{contracts.ShellBash, "init_bash.txt", "claude_wrapper_posix.txt"},
+		{contracts.ShellFish, "init_fish.txt", "claude_wrapper_fish.txt"},
+		{contracts.ShellPowerShell, "init_pwsh.txt", "claude_wrapper_pwsh.txt"},
+	}
+	e := shell.New()
+	for _, tc := range cases {
+		t.Run(tc.shell.String(), func(t *testing.T) {
+			got, err := e.EmitInitScriptWithClaude(tc.shell)
+			if err != nil {
+				t.Fatalf("EmitInitScriptWithClaude: %v", err)
+			}
+			want := readGolden(t, tc.initGolden) + "\n" + readGolden(t, tc.wrapperGolden)
+			if got != want {
+				t.Errorf("combined init mismatch for %s:\n--- want ---\n%s\n--- got ---\n%s", tc.shell.String(), want, got)
+			}
+		})
+	}
+}
+
+func TestEmitInitScriptWithClaude_UnknownShell(t *testing.T) {
+	e := shell.New()
+
+	_, err := e.EmitInitScriptWithClaude(contracts.ShellUnknown)
+	if err == nil {
+		t.Fatal("expected error for ShellUnknown, got nil")
+	}
+	if !errors.Is(err, contracts.ErrUnknownShell) {
+		t.Errorf("errors.Is(err, ErrUnknownShell) = false; err = %v", err)
+	}
+
+	_, err = e.EmitInitScriptWithClaude(contracts.Shell(999))
+	if err == nil {
+		t.Fatal("expected error for Shell(999), got nil")
+	}
+	if !errors.Is(err, contracts.ErrUnknownShell) {
+		t.Errorf("errors.Is(err, ErrUnknownShell) = false; err = %v", err)
+	}
+}
+
 // compareGolden reads testdata/golden/<name> and compares it to got. When the
 // -update flag is set, the golden is rewritten instead. A missing golden is
 // only acceptable when -update is set.
@@ -91,4 +155,16 @@ func compareGolden(t *testing.T, name, got string) {
 	if string(want) != got {
 		t.Errorf("golden mismatch for %s:\n--- want ---\n%s\n--- got ---\n%s", name, string(want), got)
 	}
+}
+
+func readGolden(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join("testdata", "golden", name)
+	// Golden names are hard-coded by the test tables above.
+	//nolint:gosec
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read golden %s: %v", path, err)
+	}
+	return string(want)
 }

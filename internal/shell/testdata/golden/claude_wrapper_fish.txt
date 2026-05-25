@@ -1,0 +1,3 @@
+function claude
+    command ccx run -- $argv
+end

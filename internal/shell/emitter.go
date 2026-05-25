@@ -56,5 +56,27 @@ func (e *Emitter) EmitInitScript(sh contracts.Shell) (string, error) {
 	}
 }
 
+// EmitInitScriptWithClaude returns the rc-file snippet from EmitInitScript plus
+// a `claude` wrapper that routes invocations through `ccx run`.
+func (e *Emitter) EmitInitScriptWithClaude(sh contracts.Shell) (string, error) {
+	initScript, err := e.EmitInitScript(sh)
+	if err != nil {
+		return "", err
+	}
+
+	switch sh {
+	case contracts.ShellZsh, contracts.ShellBash:
+		return initScript + "\n" + EmitClaudeWrapperPosix(), nil
+	case contracts.ShellFish:
+		return initScript + "\n" + EmitClaudeWrapperFish(), nil
+	case contracts.ShellPowerShell:
+		return initScript + "\n" + EmitClaudeWrapperPowerShell(), nil
+	case contracts.ShellUnknown:
+		return "", fmt.Errorf("emitting init script with claude wrapper: %w", contracts.ErrUnknownShell)
+	default:
+		return "", fmt.Errorf("emitting init script with claude wrapper for %q: %w", sh.String(), contracts.ErrUnknownShell)
+	}
+}
+
 // Compile-time check that *Emitter satisfies the contract.
 var _ contracts.ShellEmitter = (*Emitter)(nil)
