@@ -53,6 +53,7 @@ func (s *Supervisor) Run(ctx context.Context, initial contracts.Profile, args []
 	current := initial
 	runArgs := append([]string(nil), args...)
 	for {
+		s.markLaunch(current.Name, time.Now().UTC())
 		child, err := s.Launcher.Start(ctx, LaunchSpec{
 			BinaryPath: s.BinaryPath,
 			Args:       append([]string(nil), runArgs...),
@@ -155,6 +156,16 @@ func (r processResult) asError() error {
 		return ExitCodeError{Code: r.exit}
 	}
 	return nil
+}
+
+type launchMarker interface {
+	MarkLaunch(profile string, at time.Time)
+}
+
+func (s *Supervisor) markLaunch(profile string, at time.Time) {
+	if marker, ok := s.Hooks.(launchMarker); ok {
+		marker.MarkLaunch(profile, at)
+	}
 }
 
 func (s *Supervisor) currentSessionID(ctx context.Context, profile string) (string, error) {
