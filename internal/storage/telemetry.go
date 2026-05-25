@@ -272,6 +272,26 @@ ORDER BY last_seen_at DESC
 	return out, nil
 }
 
+// ProfileForSession returns the ccx profile name that owns the given Claude
+// Code session ID, as recorded in session telemetry.
+func (s *Store) ProfileForSession(ctx context.Context, sessionID string) (profile string, ok bool, err error) {
+	const q = `
+SELECT profile_name
+FROM sessions
+WHERE session_id = ?
+	LIMIT 1
+`
+	var profileName string
+	err = s.db.QueryRowContext(ctx, q, sessionID).Scan(&profileName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("profile for session %q: %w", sessionID, err)
+	}
+	return profileName, true, nil
+}
+
 // QueryRecentFailures returns StopFailure hook events ordered newest first.
 func (s *Store) QueryRecentFailures(ctx context.Context, profileName string, since time.Time) ([]contracts.HookEvent, error) {
 	const q = `

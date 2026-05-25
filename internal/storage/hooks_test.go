@@ -127,6 +127,36 @@ func TestUpsertSessionTelemetryLifecycle(t *testing.T) {
 	}
 }
 
+func TestProfileForSessionReturnsOwner(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	if err := s.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "SessionStart",
+		Timestamp: time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("UpsertSessionTelemetry: %v", err)
+	}
+
+	profile, ok, err := s.ProfileForSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("ProfileForSession: %v", err)
+	}
+	if !ok || profile != "work" {
+		t.Fatalf("ProfileForSession(s1) = (%q, %v), want (work, true)", profile, ok)
+	}
+
+	profile, ok, err = s.ProfileForSession(ctx, "missing")
+	if err != nil {
+		t.Fatalf("ProfileForSession missing: %v", err)
+	}
+	if ok || profile != "" {
+		t.Fatalf("ProfileForSession(missing) = (%q, %v), want empty false", profile, ok)
+	}
+}
+
 func TestRecordHookTelemetryWritesEventAndSessionAtomically(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
