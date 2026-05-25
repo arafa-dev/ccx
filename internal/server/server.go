@@ -26,6 +26,7 @@ type Deps struct {
 	Hooks    HookStatusProvider
 	Headroom HeadroomEvaluator
 	Ingestor HeadroomIngestor
+	Quota    QuotaProvider
 }
 
 // ProfileLister exposes the subset of the profile manager the server needs.
@@ -51,6 +52,12 @@ type HeadroomEvaluator interface {
 // HeadroomIngestor best-effort ingests profiles before headroom evaluation.
 type HeadroomIngestor interface {
 	IngestHeadroomProfiles(ctx context.Context, profiles []contracts.Profile) (map[string]string, error)
+}
+
+// QuotaProvider returns per-profile plan-aware quota windows. profileFilter
+// is the value of the profile query parameter; empty means all profiles.
+type QuotaProvider interface {
+	Quota(ctx context.Context, profileFilter string) ([]contracts.ProfileQuota, error)
 }
 
 // Server is the local HTTP server.
@@ -116,6 +123,7 @@ func (s *Server) routes() {
 	s.mux.Get("/api/hooks/status", s.handleHooksStatus)
 	s.mux.Get("/api/sessions", s.handleSessions)
 	s.mux.Get("/api/headroom", s.handleHeadroom)
+	s.mux.Get("/api/quota", s.handleQuota)
 	if s.deps.WebRoot != nil {
 		s.mux.Handle("/*", http.FileServer(s.deps.WebRoot))
 	}
