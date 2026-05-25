@@ -57,17 +57,19 @@ type Result struct {
 
 // Candidate captures one evaluated profile.
 type Candidate struct {
-	Profile         string     `json:"profile"`
-	Available       bool       `json:"available"`
-	Score           float64    `json:"score"`
-	HeadroomPercent float64    `json:"headroom_percent"`
-	AuthStatus      string     `json:"auth_status"`
-	CooldownUntil   *time.Time `json:"cooldown_until,omitempty"`
-	Reasons         []string   `json:"reasons"`
-	Priority        int        `json:"priority"`
-	Tokens24h       int        `json:"tokens_24h"`
-	Tokens7d        int        `json:"tokens_7d"`
-	USD30d          float64    `json:"usd_30d"`
+	Profile         string                 `json:"profile"`
+	Available       bool                   `json:"available"`
+	Score           float64                `json:"score"`
+	HeadroomPercent float64                `json:"headroom_percent"`
+	AuthStatus      string                 `json:"auth_status"`
+	CooldownUntil   *time.Time             `json:"cooldown_until,omitempty"`
+	Reasons         []string               `json:"reasons"`
+	Priority        int                    `json:"priority"`
+	Tokens24h       int                    `json:"tokens_24h"`
+	Tokens7d        int                    `json:"tokens_7d"`
+	USD30d          float64                `json:"usd_30d"`
+	Quota5h         *contracts.QuotaWindow `json:"quota_5h,omitempty"`
+	QuotaWeekly     *contracts.QuotaWindow `json:"quota_weekly,omitempty"`
 }
 
 // Evaluate scores every supplied profile and chooses the highest-ranked available candidate.
@@ -147,6 +149,15 @@ func (e Evaluator) evaluateProfile(ctx context.Context, p *contracts.Profile, no
 	c.Tokens24h = usage.tokens24h
 	c.Tokens7d = usage.tokens7d
 	c.USD30d = usage.usd30d
+
+	if quotaTrackingEnabled(p.Limits.PlanTier) {
+		q5h, qWeekly, err := e.computeQuota(ctx, p, now)
+		if err != nil {
+			return Candidate{}, err
+		}
+		c.Quota5h = &q5h
+		c.QuotaWeekly = &qWeekly
+	}
 
 	failures, err := e.Store.QueryRecentFailures(ctx, p.Name, now.Add(-failureLookback))
 	if err != nil {
