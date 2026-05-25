@@ -6,6 +6,7 @@ import { Header, type LiveStatus } from './header';
 import { ProfileCards } from './profile-cards';
 import { QuotaPanel } from './quota-panel';
 import { RecentSessions } from './recent-sessions';
+import { RecommendationBanner } from './recommendation-banner';
 import { RecommendationPanel } from './recommendation-panel';
 import { TimeSeriesChart } from './time-series-chart';
 import { TopProjects } from './top-projects';
@@ -18,12 +19,14 @@ import {
   getProfiles,
   getSessions,
   getUsage,
+  streamRecommendations,
   streamUsage,
   type DaemonStatus,
   type HeadroomResponse,
   type HookStatus,
   type ProfileWithTotals,
   type ProfileQuota,
+  type RecommendationEvent,
   type SessionTelemetry,
   type UsageRow,
 } from '@/lib/api';
@@ -46,6 +49,7 @@ export function Dashboard() {
   const [headroom, setHeadroom] = useState<HeadroomResponse | null>(null);
   const [hookStatuses, setHookStatuses] = useState<HookStatus[]>([]);
   const [quotas, setQuotas] = useState<ProfileQuota[]>([]);
+  const [recEvent, setRecEvent] = useState<RecommendationEvent | null>(null);
   const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [live, setLive] = useState<LiveStatus>('connecting');
@@ -222,6 +226,16 @@ export function Dashboard() {
     return stop;
   }, [refreshLiveUsage, refreshLiveMetadata]);
 
+  useEffect(() => {
+    const stop = streamRecommendations(
+      (event) => {
+        setRecEvent(event);
+      },
+      () => {},
+    );
+    return stop;
+  }, []);
+
   const profileMeta = profiles.map((p) => ({ name: p.name, color: p.color }));
   const visibleQuotas = selectedProfile
     ? quotas.filter((quota) => quota.profile === selectedProfile)
@@ -259,6 +273,7 @@ export function Dashboard() {
               hookStatuses={hookStatuses}
             />
             <QuotaPanel quotas={visibleQuotas} />
+            <RecommendationBanner event={recEvent} onSwitch={(p) => handleSelectProfile(p)} />
             <RecommendationPanel headroom={headroom} />
             <TimeSeriesChart usageRows={usageRows} profiles={profileMeta} />
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
