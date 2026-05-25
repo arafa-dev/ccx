@@ -1,3 +1,6 @@
+<!-- markdownlint-disable MD013 MD040 MD049 -->
+<!-- cspell:ignore errorlint predev regen -->
+
 # CLAUDE.md
 
 Guidance for **Claude Code** (and other Claude-based agents) working on this
