@@ -12,7 +12,9 @@ import (
 	"github.com/arafa-dev/ccx/internal/dashboard"
 	"github.com/arafa-dev/ccx/internal/headroom"
 	"github.com/arafa-dev/ccx/internal/hooks"
+	"github.com/arafa-dev/ccx/internal/quotawire"
 	"github.com/arafa-dev/ccx/internal/server"
+	"github.com/arafa-dev/ccx/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +65,10 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("dashboard assets: %w", err)
 			}
+			quotaProvider, err := dashboardQuotaProvider(deps)
+			if err != nil {
+				return err
+			}
 
 			srv := server.New(server.Deps{
 				Store:    deps.Store,
@@ -72,6 +78,7 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 				Hooks:    &hooks.Service{Profiles: deps.Profiles},
 				Headroom: headroom.Evaluator{Store: deps.Store, Pricing: deps.Pricing},
 				Ingestor: dashboardHeadroomIngestor{deps: deps},
+				Quota:    quotaProvider,
 			}, opts.Build.Version)
 
 			startPort := 7777
@@ -102,6 +109,14 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open a browser")
 	cmd.Flags().BoolVar(&daemonMode, "daemon", false, "start or use the background daemon")
 	return cmd
+}
+
+func dashboardQuotaProvider(deps *Deps) (server.QuotaProvider, error) {
+	store, ok := deps.Store.(*storage.Store)
+	if !ok {
+		return nil, fmt.Errorf("dashboard quota provider requires *storage.Store, got %T", deps.Store)
+	}
+	return &quotawire.Adapter{Store: store, Profiles: deps.Profiles}, nil
 }
 
 type dashboardHeadroomIngestor struct {

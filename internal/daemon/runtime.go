@@ -16,6 +16,7 @@ import (
 	"github.com/arafa-dev/ccx/internal/headroom"
 	"github.com/arafa-dev/ccx/internal/hooks"
 	"github.com/arafa-dev/ccx/internal/platform"
+	"github.com/arafa-dev/ccx/internal/quotawire"
 	"github.com/arafa-dev/ccx/internal/server"
 )
 
@@ -117,6 +118,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 		Daemon:   statusProvider,
 		Hooks:    &hooks.Service{Profiles: deps.Profiles},
 		Headroom: headroom.Evaluator{Store: deps.Store, Pricing: deps.Pricing},
+		Quota:    &quotawire.Adapter{Store: deps.Store, Profiles: deps.Profiles},
 	}, opts.Version)
 
 	startPort, endPort := defaultStartPort, defaultEndPort
