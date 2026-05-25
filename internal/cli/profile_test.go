@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/arafa-dev/ccx/internal/cli"
+	profilepkg "github.com/arafa-dev/ccx/internal/profile"
 )
 
 func TestProfileAddListRm(t *testing.T) {
@@ -66,6 +67,130 @@ func TestProfileAddCreatesSharedSymlink(t *testing.T) {
 	}
 	if !strings.HasSuffix(target, "shared-projects") {
 		t.Errorf("symlink target = %q, want suffix shared-projects", target)
+	}
+}
+
+func TestProfileAddStoresQuotaFlags(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	profileDir := filepath.Join(home, "claude-demo")
+	if err := os.MkdirAll(profileDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	runCLI(
+		t,
+		"profile", "add", "demo",
+		"--config-dir", profileDir,
+		"--plan-tier", "max5",
+		"--weekly-anchor", "monday",
+		"--caps-5h-turns", "1",
+		"--caps-weekly-turns", "7",
+	)
+
+	mgr, err := profilepkg.NewManager(filepath.Join(home, ".ccx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := mgr.Get(context.Background(), "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Limits.PlanTier != "max5" {
+		t.Errorf("PlanTier = %q, want max5", got.Limits.PlanTier)
+	}
+	if got.Limits.WeeklyAnchor != "monday" {
+		t.Errorf("WeeklyAnchor = %q, want monday", got.Limits.WeeklyAnchor)
+	}
+	if got.Limits.Caps5hTurns != 1 {
+		t.Errorf("Caps5hTurns = %d, want 1", got.Limits.Caps5hTurns)
+	}
+	if got.Limits.CapsWeeklyTurns != 7 {
+		t.Errorf("CapsWeeklyTurns = %d, want 7", got.Limits.CapsWeeklyTurns)
+	}
+}
+
+func TestProfileSetUpdatesQuotaFlags(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	profileDir := filepath.Join(home, "claude-demo")
+	if err := os.MkdirAll(profileDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	runCLI(t, "profile", "add", "demo", "--config-dir", profileDir)
+	runCLI(
+		t,
+		"profile", "set", "demo",
+		"--plan-tier", "max20",
+		"--weekly-anchor", "friday",
+		"--caps-5h-turns", "3",
+		"--caps-weekly-turns", "21",
+	)
+
+	mgr, err := profilepkg.NewManager(filepath.Join(home, ".ccx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := mgr.Get(context.Background(), "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Limits.PlanTier != "max20" {
+		t.Errorf("PlanTier = %q, want max20", got.Limits.PlanTier)
+	}
+	if got.Limits.WeeklyAnchor != "friday" {
+		t.Errorf("WeeklyAnchor = %q, want friday", got.Limits.WeeklyAnchor)
+	}
+	if got.Limits.Caps5hTurns != 3 {
+		t.Errorf("Caps5hTurns = %d, want 3", got.Limits.Caps5hTurns)
+	}
+	if got.Limits.CapsWeeklyTurns != 21 {
+		t.Errorf("CapsWeeklyTurns = %d, want 21", got.Limits.CapsWeeklyTurns)
+	}
+
+	runCLI(t, "profile", "set", "demo", "--weekly-anchor", "rolling", "--caps-5h-turns", "0")
+	got, err = mgr.Get(context.Background(), "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Limits.WeeklyAnchor != "" {
+		t.Errorf("WeeklyAnchor after rolling = %q, want empty rolling default", got.Limits.WeeklyAnchor)
+	}
+	if got.Limits.Caps5hTurns != 0 {
+		t.Errorf("Caps5hTurns after clear = %d, want 0", got.Limits.Caps5hTurns)
+	}
+	if got.Limits.CapsWeeklyTurns != 21 {
+		t.Errorf("CapsWeeklyTurns changed unexpectedly to %d", got.Limits.CapsWeeklyTurns)
+	}
+}
+
+func TestProfileQuotaFlagsValidateInput(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	profileDir := filepath.Join(home, "claude-demo")
+	if err := os.MkdirAll(profileDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runCLIResult([]string{"profile", "add", "demo", "--config-dir", profileDir, "--weekly-anchor", "someday"})
+	if code == 0 {
+		t.Fatalf("profile add should reject invalid weekly anchor; stderr=%q", stderr)
+	}
+	if !strings.Contains(stderr, "--weekly-anchor") {
+		t.Fatalf("stderr = %q, want --weekly-anchor validation", stderr)
+	}
+
+	runCLI(t, "profile", "add", "demo", "--config-dir", profileDir)
+	_, stderr, code = runCLIResult([]string{"profile", "set", "demo", "--caps-5h-turns", "-1"})
+	if code == 0 {
+		t.Fatalf("profile set should reject negative caps; stderr=%q", stderr)
+	}
+	if !strings.Contains(stderr, "--caps-5h-turns") {
+		t.Fatalf("stderr = %q, want --caps-5h-turns validation", stderr)
 	}
 }
 

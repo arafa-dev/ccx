@@ -34,9 +34,10 @@ func newProfileCommand(_ *Options) *cobra.Command {
 func newProfileSetCmd() *cobra.Command {
 	var (
 		label, color, suggestions, rateLimitCooldown string
-		planTier                                     string
+		planTier, weeklyAnchor                       string
 		dailyTokens, weeklyTokens, priority          int
 		monthlyUSD                                   float64
+		caps5hTurns, capsWeeklyTurns                 int
 		asJSON                                       bool
 	)
 	cmd := &cobra.Command{
@@ -82,6 +83,25 @@ func newProfileSetCmd() *cobra.Command {
 					}
 					p.Limits.PlanTier = tier
 				}
+				if flags.Changed("weekly-anchor") {
+					anchor, err := parseWeeklyAnchor(weeklyAnchor)
+					if err != nil {
+						return err
+					}
+					p.Limits.WeeklyAnchor = anchor
+				}
+				if flags.Changed("caps-5h-turns") {
+					if err := validateTurnCap("--caps-5h-turns", caps5hTurns); err != nil {
+						return err
+					}
+					p.Limits.Caps5hTurns = caps5hTurns
+				}
+				if flags.Changed("caps-weekly-turns") {
+					if err := validateTurnCap("--caps-weekly-turns", capsWeeklyTurns); err != nil {
+						return err
+					}
+					p.Limits.CapsWeeklyTurns = capsWeeklyTurns
+				}
 				if flags.Changed("suggestions") {
 					enabled, err := parseSuggestionState(suggestions)
 					if err != nil {
@@ -113,6 +133,9 @@ func newProfileSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&suggestions, "suggestions", "", "suggestion eligibility: enabled or disabled")
 	cmd.Flags().StringVar(&rateLimitCooldown, "rate-limit-cooldown", "", "rate-limit cooldown duration; pass an empty value to clear")
 	cmd.Flags().StringVar(&planTier, "plan-tier", "", "subscription plan tier: pro, max5, max20, api, or empty to clear")
+	cmd.Flags().StringVar(&weeklyAnchor, "weekly-anchor", "", "weekly quota anchor: rolling or a weekday")
+	cmd.Flags().IntVar(&caps5hTurns, "caps-5h-turns", 0, "override 5-hour turn cap; 0 uses the tier default")
+	cmd.Flags().IntVar(&capsWeeklyTurns, "caps-weekly-turns", 0, "override weekly turn cap; 0 uses the tier default")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON output")
 	return cmd
 }
@@ -127,6 +150,25 @@ func parsePlanTier(value string) (string, error) {
 	}
 }
 
+func parseWeeklyAnchor(value string) (string, error) {
+	anchor := strings.ToLower(strings.TrimSpace(value))
+	switch anchor {
+	case "", "rolling":
+		return "", nil
+	case "sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday":
+		return anchor, nil
+	default:
+		return "", fmt.Errorf("--weekly-anchor must be rolling or one of: sunday, monday, tuesday, wednesday, thursday, friday, saturday")
+	}
+}
+
+func validateTurnCap(flag string, value int) error {
+	if value < 0 {
+		return fmt.Errorf("%s must be non-negative", flag)
+	}
+	return nil
+}
+
 func parseSuggestionState(value string) (bool, error) {
 	switch strings.ToLower(value) {
 	case "enabled":
@@ -139,7 +181,12 @@ func parseSuggestionState(value string) (bool, error) {
 }
 
 func newProfileAddCmd() *cobra.Command {
-	var configDir, label, color string
+	var (
+		configDir, label, color string
+		planTier, weeklyAnchor  string
+		caps5hTurns             int
+		capsWeeklyTurns         int
+	)
 	cmd := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Register a new profile",
@@ -153,6 +200,20 @@ func newProfileAddCmd() *cobra.Command {
 			defer func() { _ = deps.Close() }()
 
 			name := args[0]
+			tier, err := parsePlanTier(planTier)
+			if err != nil {
+				return err
+			}
+			anchor, err := parseWeeklyAnchor(weeklyAnchor)
+			if err != nil {
+				return err
+			}
+			if err := validateTurnCap("--caps-5h-turns", caps5hTurns); err != nil {
+				return err
+			}
+			if err := validateTurnCap("--caps-weekly-turns", capsWeeklyTurns); err != nil {
+				return err
+			}
 			p := contracts.Profile{
 				Name:       name,
 				ConfigDir:  configDir,
@@ -160,6 +221,12 @@ func newProfileAddCmd() *cobra.Command {
 				Color:      color,
 				CreatedAt:  time.Now().UTC(),
 				LastUsedAt: time.Time{},
+				Limits: contracts.ProfileLimits{
+					PlanTier:        tier,
+					WeeklyAnchor:    anchor,
+					Caps5hTurns:     caps5hTurns,
+					CapsWeeklyTurns: capsWeeklyTurns,
+				},
 			}
 			home, err := platform.CCXHome()
 			if err != nil {
@@ -187,6 +254,10 @@ func newProfileAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configDir, "config-dir", "", "absolute path to the Claude Code config directory (required)")
 	cmd.Flags().StringVar(&label, "label", "", "human-readable label")
 	cmd.Flags().StringVar(&color, "color", "", "hex accent color for the dashboard, e.g. #3B82F6")
+	cmd.Flags().StringVar(&planTier, "plan-tier", "", "subscription plan tier: pro, max5, max20, api")
+	cmd.Flags().StringVar(&weeklyAnchor, "weekly-anchor", "", "weekly quota anchor: rolling or a weekday")
+	cmd.Flags().IntVar(&caps5hTurns, "caps-5h-turns", 0, "override 5-hour turn cap; 0 uses the tier default")
+	cmd.Flags().IntVar(&capsWeeklyTurns, "caps-weekly-turns", 0, "override weekly turn cap; 0 uses the tier default")
 	_ = cmd.MarkFlagRequired("config-dir")
 	return cmd
 }
