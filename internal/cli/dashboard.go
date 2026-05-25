@@ -13,6 +13,7 @@ import (
 	"github.com/arafa-dev/ccx/internal/headroom"
 	"github.com/arafa-dev/ccx/internal/hooks"
 	"github.com/arafa-dev/ccx/internal/quotawire"
+	"github.com/arafa-dev/ccx/internal/recstream"
 	"github.com/arafa-dev/ccx/internal/server"
 	"github.com/arafa-dev/ccx/internal/storage"
 	"github.com/spf13/cobra"
@@ -73,16 +74,19 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recommendations := recstream.NewHub()
+			defer recommendations.Close()
 
 			srv := server.New(server.Deps{
-				Store:    deps.Store,
-				Pricing:  deps.Pricing,
-				Profiles: deps.Profiles,
-				WebRoot:  webFS,
-				Hooks:    &hooks.Service{Profiles: deps.Profiles},
-				Headroom: headroom.Evaluator{Store: headroomStore, Pricing: deps.Pricing},
-				Ingestor: dashboardHeadroomIngestor{deps: deps},
-				Quota:    quotaProvider,
+				Store:           deps.Store,
+				Pricing:         deps.Pricing,
+				Profiles:        deps.Profiles,
+				WebRoot:         webFS,
+				Hooks:           &hooks.Service{Profiles: deps.Profiles},
+				Headroom:        headroom.Evaluator{Store: headroomStore, Pricing: deps.Pricing},
+				Ingestor:        dashboardHeadroomIngestor{deps: deps},
+				Quota:           quotaProvider,
+				Recommendations: recommendations,
 			}, opts.Build.Version)
 
 			startPort := 7777

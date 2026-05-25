@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -173,6 +176,55 @@ func TestDashboardUsesRunningDaemonURLWhenBrowserOpenFails(t *testing.T) {
 	}
 }
 
+func TestDashboardForegroundRecommendationsLiveIsIdleSSE(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	port := freeDashboardTestPort(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var stdout, stderr bytes.Buffer
+	done := make(chan int, 1)
+	go func() {
+		done <- Run(ctx, Options{
+			Args:   []string{"dashboard", "--no-open", "--port", strconv.Itoa(port)},
+			Stdout: &stdout,
+			Stderr: &stderr,
+			Build:  BuildInfo{Version: "test"},
+		})
+	}()
+
+	waitForDashboardHealth(t, port)
+	reqCtx, reqCancel := context.WithTimeout(context.Background(), time.Second)
+	defer reqCancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/api/recommendations/live", port), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET recommendations live: %v; stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("recommendations status = %d, want 200", res.StatusCode)
+	}
+	if contentType := res.Header.Get("Content-Type"); !strings.Contains(contentType, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", contentType)
+	}
+
+	cancel()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("dashboard exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("dashboard did not exit after context cancel")
+	}
+}
+
 func TestDashboardDaemonStartsDaemonWhenAbsent(t *testing.T) {
 	root := t.TempDir()
 	proc := newCLIFakeProcess(root)
@@ -201,6 +253,33 @@ func TestDashboardDaemonStartsDaemonWhenAbsent(t *testing.T) {
 	if opened != "" {
 		t.Fatalf("--no-open still opened %q", opened)
 	}
+}
+
+func freeDashboardTestPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func waitForDashboardHealth(t *testing.T, port int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	url := fmt.Sprintf("http://127.0.0.1:%d/api/health", port)
+	for time.Now().Before(deadline) {
+		res, err := http.Get(url) //nolint:gosec,noctx // Test helper with short deadline loop.
+		if err == nil {
+			_ = res.Body.Close()
+			if res.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("dashboard health did not become ready at %s", url)
 }
 
 func TestDashboardDaemonTreatsPIDOnlyDaemonAsNotReady(t *testing.T) {
