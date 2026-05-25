@@ -197,12 +197,65 @@ func (e Evaluator) evaluateProfile(ctx context.Context, p *contracts.Profile, no
 	} else if healthPenalty > 0 {
 		c.Reasons = append(c.Reasons, fmt.Sprintf("auth health %s penalty %.0f", c.AuthStatus, healthPenalty))
 	}
+	quotaPenalty := e.applyQuotaGates(&c)
 	if len(c.Reasons) == 0 {
 		c.Reasons = append(c.Reasons, "available")
 	}
 
-	c.Score = c.HeadroomPercent + float64(p.Limits.Priority) - failurePenalty - healthPenalty
+	c.Score = c.HeadroomPercent + float64(p.Limits.Priority) - failurePenalty - healthPenalty - quotaPenalty
 	return c, nil
+}
+
+func (e Evaluator) applyQuotaGates(c *Candidate) (penalty float64) {
+	type windowInfo struct {
+		name string
+		w    *contracts.QuotaWindow
+	}
+	windows := []windowInfo{
+		{name: "5h", w: c.Quota5h},
+		{name: "weekly", w: c.QuotaWeekly},
+	}
+	worst := PressureNone
+	worstPct := 0.0
+	for _, wi := range windows {
+		if wi.w == nil || wi.w.Cap == 0 {
+			continue
+		}
+		level := PressureLevelFromPct(wi.w.Pct)
+		c.Reasons = append(c.Reasons, fmt.Sprintf("%s turns %d/%d (%s)", wi.name, wi.w.Used, wi.w.Cap, formatPressurePct(level, wi.w.Pct)))
+		if level > worst || (level == worst && wi.w.Pct > worstPct) {
+			worst = level
+			worstPct = wi.w.Pct
+		}
+		if level == PressureHard {
+			c.Available = false
+			if !wi.w.ResetsAt.IsZero() && (c.CooldownUntil == nil || wi.w.ResetsAt.After(*c.CooldownUntil)) {
+				resets := wi.w.ResetsAt
+				c.CooldownUntil = &resets
+			}
+		}
+	}
+	switch worst {
+	case PressureSoft:
+		penalty = SoftPenalty(worstPct)
+		c.Reasons = append(c.Reasons, fmt.Sprintf("quota pressure %s soft penalty %.0f", formatPressurePct(worst, worstPct), penalty))
+	case PressureWarn:
+		c.Reasons = append(c.Reasons, fmt.Sprintf("quota pressure %s (warn)", formatPressurePct(worst, worstPct)))
+	case PressureHard:
+		c.Reasons = append(c.Reasons, fmt.Sprintf("quota pressure %s (hard cap)", formatPressurePct(worst, worstPct)))
+	case PressureNone:
+	}
+	return penalty
+}
+
+func formatPressurePct(level PressureLevel, pct float64) string {
+	if level != PressureHard {
+		pct = math.Floor(pct*10) / 10
+		if pct >= ThresholdHardPct {
+			pct = ThresholdHardPct - 0.1
+		}
+	}
+	return fmt.Sprintf("%.1f%%", pct)
 }
 
 func (e Evaluator) now() time.Time {

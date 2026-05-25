@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -423,6 +424,127 @@ func TestHeadroomPercentIncludesWeeklyQuota(t *testing.T) {
 	}
 }
 
+func TestScoreAppliesSoftPenaltyBetween90And100(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	seedTurns(store, "hot", 855, 855)
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("hot", contracts.ProfileLimits{PlanTier: "max20"}),
+	})
+	c := mustCandidate(t, result, "hot")
+	if !c.Available {
+		t.Errorf("at 95%% should still be available; got %+v", c)
+	}
+	if c.Score >= 0 {
+		t.Errorf("Score = %v, expected negative after soft penalty", c.Score)
+	}
+}
+
+func TestAvailableFalseAtHardCap(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	seedTurns(store, "capped", 900, 900)
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("capped", contracts.ProfileLimits{PlanTier: "max20"}),
+	})
+	c := mustCandidate(t, result, "capped")
+	if c.Available {
+		t.Errorf("at 100%% should be unavailable")
+	}
+	if c.CooldownUntil == nil {
+		t.Errorf("CooldownUntil should be set when at hard cap")
+	}
+}
+
+func TestWeeklyHardCapAlsoExcludes(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	seedTurns(store, "week-capped", 10, 4500)
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("week-capped", contracts.ProfileLimits{
+			PlanTier:        "max20",
+			CapsWeeklyTurns: 4500,
+		}),
+	})
+	if mustCandidate(t, result, "week-capped").Available {
+		t.Errorf("weekly hard cap should make profile unavailable")
+	}
+}
+
+func TestWarnAddsReasonNoScoreImpact(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	seedTurns(store, "warm", 700, 700)
+
+	store2 := newFakeStore(now)
+	result := evaluate(t, store, []contracts.Profile{
+		profile("warm", contracts.ProfileLimits{PlanTier: "max20"}),
+	})
+	baselineResult := evaluate(t, store2, []contracts.Profile{
+		profile("warm", contracts.ProfileLimits{PlanTier: "max20"}),
+	})
+
+	c := mustCandidate(t, result, "warm")
+	baseline := mustCandidate(t, baselineResult, "warm")
+
+	hasReason := false
+	for _, r := range c.Reasons {
+		if strings.Contains(r, "5h turns") {
+			hasReason = true
+			break
+		}
+	}
+	if !hasReason {
+		t.Errorf("warm profile should have a 5h-turn reason; got %v", c.Reasons)
+	}
+
+	if diff := baseline.HeadroomPercent - c.HeadroomPercent; diff > 0.01 || diff < -0.01 {
+		t.Errorf("warn band changed HeadroomPercent by %.2f; want no change", diff)
+	}
+	if diff := baseline.Score - c.Score; diff > 0.01 || diff < -0.01 {
+		t.Errorf("warn band changed Score by %.2f; want no score impact", diff)
+	}
+}
+
+func TestSoftPenaltyUsesHighestPressureWithinSameBand(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	seedTurns(store, "mixed-soft", 810, 990)
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("mixed-soft", contracts.ProfileLimits{
+			PlanTier:        "max20",
+			CapsWeeklyTurns: 1000,
+		}),
+	})
+	c := mustCandidate(t, result, "mixed-soft")
+	if c.Score != -18 {
+		t.Errorf("Score = %v, want -18 from 99%% weekly pressure soft penalty", c.Score)
+	}
+}
+
+func TestSoftReasonDoesNotRoundBelowHardCapTo100(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	seedTurns(store, "almost-capped", 1999, 1999)
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("almost-capped", contracts.ProfileLimits{
+			PlanTier:    "max20",
+			Caps5hTurns: 2000,
+		}),
+	})
+	c := mustCandidate(t, result, "almost-capped")
+	for _, reason := range c.Reasons {
+		if strings.Contains(reason, "100.0%") {
+			t.Fatalf("soft-cap reason should not round to 100%%: %v", c.Reasons)
+		}
+	}
+}
+
 func evaluate(t *testing.T, store *fakeStore, profiles []contracts.Profile) headroom.Result {
 	t.Helper()
 	return evaluateWithOptions(t, store, profiles, headroom.Options{})
@@ -481,7 +603,7 @@ func testNow() time.Time {
 
 func seedTurns(s *fakeStore, profile string, count5h, countWeekly int) {
 	for i := 0; i < count5h; i++ {
-		s.addTurn(profile, s.now.Add(-time.Duration(i+1)*time.Minute))
+		s.addTurn(profile, s.now.Add(-time.Minute-time.Duration(i)*time.Nanosecond))
 	}
 	extra := countWeekly - count5h
 	for i := 0; i < extra; i++ {
