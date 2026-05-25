@@ -156,6 +156,33 @@ func TestUsageEndpointReportsPricingErrors(t *testing.T) {
 	}
 }
 
+func TestUsageEndpointReturnsEmptyRowsArrayWhenStoreHasNoRows(t *testing.T) {
+	srv := server.New(server.Deps{Store: &mockStore{}, Pricing: &mockPricing{}}, "test")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	res, err := ts.Client().Get(ts.URL + "/api/usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusOK)
+	}
+	var body struct {
+		Rows []contracts.UsageRow `json:"rows"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Rows == nil {
+		t.Fatal("usage rows decoded to nil slice, want empty array")
+	}
+	if len(body.Rows) != 0 {
+		t.Fatalf("usage rows length = %d, want 0", len(body.Rows))
+	}
+}
+
 func TestUsageEndpointRejectsNonPositiveSince(t *testing.T) {
 	srv := server.New(server.Deps{Store: &mockStore{}, Pricing: &mockPricing{}}, "test")
 	ts := httptest.NewServer(srv.Handler())
