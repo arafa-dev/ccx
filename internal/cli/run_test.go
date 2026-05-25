@@ -165,6 +165,61 @@ func TestRunLaunchPassesSelectedEnvAndArgsToChild(t *testing.T) {
 	}
 }
 
+func TestRunSuperviseLaunchesSelectedEnvAndArgsToChild(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	cfgDir := filepath.Join(home, "claude-work")
+	if err := os.MkdirAll(filepath.Join(cfgDir, "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, "profile", "add", "work", "--config-dir", cfgDir)
+
+	capture := filepath.Join(t.TempDir(), "capture.txt")
+	binary := createCaptureClaude(t, t.TempDir(), capture)
+	_, stderr, code := runCLIResult([]string{"run", "--quiet", "--supervise", "--profile", "work", "--claude-binary", binary, "--", "alpha", "two words"})
+	if code != 0 {
+		t.Fatalf("exit code: got %d, want 0; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stderr, "recommendation stream unavailable") {
+		t.Fatalf("stderr = %q, want degraded supervisor warning", stderr)
+	}
+	got, err := os.ReadFile(capture) //nolint:gosec // Test reads its own temp capture file.
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"CLAUDE_CONFIG_DIR=" + cfgDir,
+		"CCX_ACTIVE_PROFILE=work",
+		"ARGS=alpha|two words",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("capture missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunSuperviseRejectsTooLowPollInterval(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	cfgDir := filepath.Join(home, "claude-work")
+	if err := os.MkdirAll(filepath.Join(cfgDir, "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, "profile", "add", "work", "--config-dir", cfgDir)
+
+	_, stderr, code := runCLIResult([]string{"run", "--quiet", "--supervise", "--poll-interval", "10ms", "--profile", "work", "--claude-binary", createFakeClaude(t, t.TempDir(), 0)})
+	if code == 0 {
+		t.Fatal("expected non-zero exit for too-low poll interval")
+	}
+	if !strings.Contains(stderr, "at least 250ms") {
+		t.Fatalf("stderr = %q, want poll interval floor", stderr)
+	}
+}
+
 func TestRunExplicitProfileDoesNotScanBeforeLaunch(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

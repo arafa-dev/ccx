@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
@@ -15,6 +17,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const minimumSupervisorPollInterval = 250 * time.Millisecond
+
 func newRunCommand(opts *Options) *cobra.Command {
 	var (
 		overrideProfile string
@@ -22,6 +26,8 @@ func newRunCommand(opts *Options) *cobra.Command {
 		printOnly       bool
 		quiet           bool
 		verbose         bool
+		supervise       bool
+		pollInterval    time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "run [-- args...]",
@@ -29,6 +35,9 @@ func newRunCommand(opts *Options) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			ctx := c.Context()
+			if supervise && pollInterval > 0 && pollInterval < minimumSupervisorPollInterval {
+				return fmt.Errorf("--poll-interval must be at least %s", minimumSupervisorPollInterval)
+			}
 			deps, err := buildDeps(ctx)
 			if err != nil {
 				return err
@@ -97,6 +106,10 @@ func newRunCommand(opts *Options) *cobra.Command {
 				_, _ = fmt.Fprintf(c.ErrOrStderr(), "ccx: launching binary=%s args=%s\n", binary, joinRunArgs(args))
 			}
 
+			if supervise {
+				return runSupervisor(ctx, opts, c, deps, profiles, &profile, adapter, binary, args, pollInterval)
+			}
+
 			exitCode, err := run.Launch(ctx, run.LaunchSpec{
 				BinaryPath: binary,
 				Args:       args,
@@ -116,7 +129,85 @@ func newRunCommand(opts *Options) *cobra.Command {
 	cmd.Flags().BoolVar(&printOnly, "print-only", false, "print planned launch without starting claude")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "suppress profile selection rationale")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "print extra launch detail")
+	cmd.Flags().BoolVar(&supervise, "supervise", false, "stay attached and mid-session swap on hard pressure")
+	cmd.Flags().DurationVar(&pollInterval, "poll-interval", 0, "supervisor hook polling interval (minimum 250ms)")
 	return cmd
+}
+
+func runSupervisor(
+	ctx context.Context,
+	opts *Options,
+	c *cobra.Command,
+	deps *Deps,
+	profiles []contracts.Profile,
+	initial *contracts.Profile,
+	adapter evaluatorAdapter,
+	binary string,
+	args []string,
+	pollInterval time.Duration,
+) error {
+	if initial == nil {
+		return errors.New("supervise requires an initial profile")
+	}
+	hookStore, ok := deps.Store.(run.QueryHookEventsStore)
+	if !ok {
+		return fmt.Errorf("supervise requires hook event queries, got %T", deps.Store)
+	}
+	hooks := &run.DBHookSource{
+		Store:        hookStore,
+		PollInterval: pollInterval,
+	}
+	events, eventsErr := recommendationEvents(ctx, opts)
+	if eventsErr != nil {
+		_, _ = fmt.Fprintf(c.ErrOrStderr(), "ccx: supervisor: recommendation stream unavailable (%v); mid-session swaps disabled\n", eventsErr)
+	}
+	supervisor := &run.Supervisor{
+		Profiles: profiles,
+		Picker: func(ctx context.Context, exclude string) (contracts.Profile, string, error) {
+			return run.Pick(ctx, run.PickOptions{
+				Profiles:  excludeProfile(profiles, exclude),
+				Evaluator: adapter,
+			})
+		},
+		Events:     events,
+		Hooks:      hooks,
+		Launcher:   run.OSChildLauncher{},
+		BinaryPath: binary,
+		BaseEnv:    os.Environ(),
+		ResumeFlag: "--resume",
+		Logger: func(format string, args ...any) {
+			_, _ = fmt.Fprintf(c.ErrOrStderr(), "ccx: "+format+"\n", args...)
+		},
+	}
+	return supervisor.Run(ctx, *initial, args)
+}
+
+func recommendationEvents(ctx context.Context, opts *Options) (<-chan contracts.RecommendationEvent, error) {
+	status, err := daemonController(opts).Status(ctx)
+	if err != nil || !status.Running || status.URL == "" {
+		if err != nil {
+			return nil, fmt.Errorf("daemon status: %w", err)
+		}
+		if !status.Running {
+			return nil, errors.New("daemon is not running")
+		}
+		return nil, errors.New("daemon status did not include a URL")
+	}
+	events, err := run.OpenSSE(ctx, strings.TrimRight(status.URL, "/")+"/api/recommendations/live")
+	if err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+func excludeProfile(profiles []contracts.Profile, exclude string) []contracts.Profile {
+	filtered := make([]contracts.Profile, 0, len(profiles))
+	for i := range profiles {
+		if profiles[i].Name != exclude {
+			filtered = append(filtered, profiles[i])
+		}
+	}
+	return filtered
 }
 
 func runScanFailures(ctx context.Context, opts *Options, deps *Deps, profiles []contracts.Profile, overrideProfile string) (map[string]string, error) {
