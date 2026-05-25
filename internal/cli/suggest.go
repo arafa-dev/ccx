@@ -158,7 +158,8 @@ func renderSuggest(w io.Writer, result headroom.Result) error {
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "PROFILE\tAVAILABLE\tSCORE\tHEADROOM\tAUTH\tREASONS")
-	for _, c := range result.Candidates {
+	for i := range result.Candidates {
+		c := &result.Candidates[i]
 		_, _ = fmt.Fprintf(
 			tw, "%s\t%t\t%.1f\t%.1f%%\t%s\t%s\n",
 			c.Profile,

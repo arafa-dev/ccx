@@ -329,6 +329,59 @@ func TestFakeStoreQueriesTurnsInWindow(t *testing.T) {
 	}
 }
 
+func TestEvaluatePopulatesQuotaFieldsWhenPlanTierSet(t *testing.T) {
+	cases := []struct {
+		tier    string
+		wantCap int
+	}{
+		{tier: "pro", wantCap: 45},
+		{tier: "max5", wantCap: 225},
+		{tier: "max20", wantCap: 900},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tier, func(t *testing.T) {
+			now := testNow()
+			store := newFakeStore(now)
+			seedTurns(store, tc.tier, 3, 7)
+
+			result := evaluate(t, store, []contracts.Profile{
+				profile(tc.tier, contracts.ProfileLimits{PlanTier: tc.tier}),
+			})
+			c := mustCandidate(t, result, tc.tier)
+			if c.Quota5h == nil {
+				t.Fatal("Quota5h should be populated when PlanTier is set")
+			}
+			if c.Quota5h.Used != 3 || c.Quota5h.Cap != tc.wantCap {
+				t.Errorf("Quota5h: got %+v, want Used=3 Cap=%d", *c.Quota5h, tc.wantCap)
+			}
+			if c.QuotaWeekly == nil || c.QuotaWeekly.Used != 7 {
+				t.Errorf("QuotaWeekly: got %+v, want Used=7", c.QuotaWeekly)
+			}
+		})
+	}
+}
+
+func TestEvaluateOmitsQuotaFieldsWhenPlanTierOptOut(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	seedTurns(store, "no-tier", 1, 1)
+	seedTurns(store, "api-dev", 1, 1)
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("no-tier", contracts.ProfileLimits{}),
+		profile("api-dev", contracts.ProfileLimits{PlanTier: "api"}),
+	})
+	for i := range result.Candidates {
+		c := &result.Candidates[i]
+		if c.Quota5h != nil {
+			t.Errorf("%s Quota5h = %+v, want nil for quota opt-out", c.Profile, c.Quota5h)
+		}
+		if c.QuotaWeekly != nil {
+			t.Errorf("%s QuotaWeekly = %+v, want nil for quota opt-out", c.Profile, c.QuotaWeekly)
+		}
+	}
+}
+
 func evaluate(t *testing.T, store *fakeStore, profiles []contracts.Profile) headroom.Result {
 	t.Helper()
 	return evaluateWithOptions(t, store, profiles, headroom.Options{})
@@ -383,6 +436,16 @@ func profile(name string, limits contracts.ProfileLimits) contracts.Profile {
 
 func testNow() time.Time {
 	return time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC)
+}
+
+func seedTurns(s *fakeStore, profile string, count5h, countWeekly int) {
+	for i := 0; i < count5h; i++ {
+		s.addTurn(profile, s.now.Add(-time.Duration(i+1)*time.Minute))
+	}
+	extra := countWeekly - count5h
+	for i := 0; i < extra; i++ {
+		s.addTurn(profile, s.now.Add(-6*time.Hour-time.Duration(i+1)*time.Minute))
+	}
 }
 
 type fakeStore struct {
