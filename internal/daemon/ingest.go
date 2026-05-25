@@ -13,7 +13,7 @@ import (
 )
 
 type runtimeDeps struct {
-	Store    contracts.Store
+	Store    *storage.Store
 	Profiles *profile.Manager
 	Scanner  contracts.Scanner
 	Pricing  contracts.PricingTable
