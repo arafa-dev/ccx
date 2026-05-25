@@ -41,6 +41,76 @@ func TestInsertHookEventAndQueryRecentFailures(t *testing.T) {
 	}
 }
 
+func TestQueryHookEventsForSessionFiltersBySessionAndSince(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	base := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
+	events := []contracts.HookEvent{
+		{Session: "sid-1", Event: "SessionStart", Timestamp: base.Add(-time.Minute), Transcript: "/tmp/old.jsonl"},
+		{Session: "sid-2", Event: "Stop", Timestamp: base.Add(time.Second), Transcript: "/tmp/other.jsonl"},
+		{Session: "sid-1", Event: "PreCompact", Timestamp: base.Add(2 * time.Second), Transcript: "/tmp/sid-1.jsonl"},
+		{Session: "sid-1", Event: "Stop", Timestamp: base.Add(3 * time.Second), Transcript: "/tmp/sid-1.jsonl", Reason: "turn-complete"},
+	}
+	for _, ev := range events {
+		if err := s.InsertHookEvent(ctx, "work", ev); err != nil {
+			t.Fatalf("InsertHookEvent(%s/%s): %v", ev.Session, ev.Event, err)
+		}
+	}
+
+	got, err := s.QueryHookEventsForSession(ctx, "sid-1", base)
+	if err != nil {
+		t.Fatalf("QueryHookEventsForSession: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("events = %d, want 2: %+v", len(got), got)
+	}
+	if got[0].Event != "PreCompact" || got[1].Event != "Stop" {
+		t.Fatalf("events = %v, want PreCompact then Stop", []string{got[0].Event, got[1].Event})
+	}
+	if got[1].Profile != "work" || got[1].Session != "sid-1" || got[1].Reason != "turn-complete" {
+		t.Fatalf("Stop event = %+v, want work/sid-1 with reason", got[1])
+	}
+}
+
+func TestQueryHookEventsForSessionAfterIDUsesInsertionOrder(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "work")
+
+	oldPayloadTime := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
+	if err := s.InsertHookEvent(ctx, "work", contracts.HookEvent{
+		Session:   "sid-1",
+		Event:     "SessionStart",
+		Timestamp: oldPayloadTime,
+	}); err != nil {
+		t.Fatalf("InsertHookEvent start: %v", err)
+	}
+	afterID, err := s.LatestHookEventID(ctx, "sid-1")
+	if err != nil {
+		t.Fatalf("LatestHookEventID: %v", err)
+	}
+	if afterID == 0 {
+		t.Fatal("LatestHookEventID = 0 after inserted start event")
+	}
+	if err := s.InsertHookEvent(ctx, "work", contracts.HookEvent{
+		Session:   "sid-1",
+		Event:     "Stop",
+		Timestamp: oldPayloadTime.Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("InsertHookEvent stop: %v", err)
+	}
+
+	got, err := s.QueryHookEventsForSessionAfterID(ctx, "sid-1", afterID)
+	if err != nil {
+		t.Fatalf("QueryHookEventsForSessionAfterID: %v", err)
+	}
+	if len(got) != 1 || got[0].Event != "Stop" {
+		t.Fatalf("events after id = %+v, want delayed Stop", got)
+	}
+}
+
 func TestUpsertSessionTelemetryLifecycle(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

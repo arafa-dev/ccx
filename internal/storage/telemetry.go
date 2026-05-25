@@ -294,59 +294,22 @@ WHERE session_id = ?
 
 // QueryRecentFailures returns StopFailure hook events ordered newest first.
 func (s *Store) QueryRecentFailures(ctx context.Context, profileName string, since time.Time) ([]contracts.HookEvent, error) {
-	const q = `
+	query := `
 SELECT
-    profile_name,
-    session_id,
-    event_name,
-    ts,
-    COALESCE(transcript_path, ''),
-    COALESCE(cwd, ''),
-    COALESCE(model, ''),
-    COALESCE(source, ''),
-    COALESCE(permission_mode, ''),
-    COALESCE(reason, ''),
-    COALESCE(error, ''),
-    COALESCE(error_details, ''),
-    COALESCE(trigger, '')
+` + hookEventSelectColumns + `
 FROM hook_events
 WHERE profile_name = ? AND event_name = 'StopFailure' AND ts >= ?
 ORDER BY ts DESC
 `
-	rows, err := s.db.QueryContext(ctx, q, profileName, unixNano(since))
+	rows, err := s.db.QueryContext(ctx, query, profileName, unixNano(since))
 	if err != nil {
 		return nil, fmt.Errorf("querying recent failures for %q: %w", profileName, err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []contracts.HookEvent
-	for rows.Next() {
-		var (
-			ev contracts.HookEvent
-			ns int64
-		)
-		if err := rows.Scan(
-			&ev.Profile,
-			&ev.Session,
-			&ev.Event,
-			&ns,
-			&ev.Transcript,
-			&ev.CWD,
-			&ev.Model,
-			&ev.Source,
-			&ev.Permission,
-			&ev.Reason,
-			&ev.Error,
-			&ev.ErrorDetails,
-			&ev.Trigger,
-		); err != nil {
-			return nil, fmt.Errorf("scanning recent failure row: %w", err)
-		}
-		ev.Timestamp = time.Unix(0, ns).UTC()
-		out = append(out, ev)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating recent failure rows: %w", err)
+	out, err := scanHookEvents(rows)
+	if err != nil {
+		return nil, fmt.Errorf("querying recent failures for %q: %w", profileName, err)
 	}
 	return out, nil
 }
