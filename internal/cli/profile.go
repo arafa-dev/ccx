@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
+	"github.com/arafa-dev/ccx/internal/platform"
+	"github.com/arafa-dev/ccx/internal/quotamigrate"
 	"github.com/spf13/cobra"
 )
 
@@ -159,8 +161,22 @@ func newProfileAddCmd() *cobra.Command {
 				CreatedAt:  time.Now().UTC(),
 				LastUsedAt: time.Time{},
 			}
+			home, err := platform.CCXHome()
+			if err != nil {
+				return err
+			}
+			steps, err := quotamigrate.Plan(home, []contracts.Profile{p})
+			if err != nil {
+				return err
+			}
 			if err := deps.Profiles.Add(ctx, p); err != nil {
 				return err
+			}
+			if err := quotamigrate.Apply(steps); err != nil {
+				if removeErr := deps.Profiles.Remove(ctx, name); removeErr != nil {
+					return fmt.Errorf("setting up shared projects: %w; rollback profile registration failed: %w", err, removeErr)
+				}
+				return fmt.Errorf("setting up shared projects: %w", err)
 			}
 			_, _ = fmt.Fprintf(c.OutOrStdout(),
 				"Profile '%s' added.\nNext: eval \"$(ccx use %s)\" && claude /login\n",

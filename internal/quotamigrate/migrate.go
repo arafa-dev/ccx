@@ -98,6 +98,9 @@ func Plan(ccxHome string, profiles []contracts.Profile) ([]Step, error) {
 // Apply executes the plan. It is safe to re-run idempotent steps. It stops at
 // the first error and returns it; partial state may be left on disk.
 func Apply(steps []Step) error {
+	if err := preflightSymlinkSteps(steps); err != nil {
+		return err
+	}
 	for _, step := range steps {
 		switch step.Action {
 		case ActionMoveContents:
@@ -114,6 +117,41 @@ func Apply(steps []Step) error {
 	}
 
 	return nil
+}
+
+func preflightSymlinkSteps(steps []Step) error {
+	for i, step := range steps {
+		if step.Action != ActionCreateSymlink {
+			continue
+		}
+		link, err := preflightSymlinkPath(filepath.Dir(step.From), i)
+		if err != nil {
+			return err
+		}
+		if err := applyCreateSymlink(link, step.To); err != nil {
+			return fmt.Errorf("preflight symlink %q -> %q: %w", link, step.To, err)
+		}
+		if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove preflight symlink %q: %w", link, err)
+		}
+	}
+
+	return nil
+}
+
+func preflightSymlinkPath(parent string, stepIndex int) (string, error) {
+	for attempt := range 10 {
+		path := filepath.Join(parent, fmt.Sprintf(".ccx-symlink-preflight-%d-%d-%d", os.Getpid(), stepIndex, attempt))
+		_, err := os.Lstat(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return path, nil
+		case err != nil:
+			return "", fmt.Errorf("lstat preflight symlink path %q: %w", path, err)
+		}
+	}
+
+	return "", fmt.Errorf("could not choose unused preflight symlink path in %q", parent)
 }
 
 func applyMoveContents(src, dst string) error {
@@ -177,7 +215,7 @@ func applyCreateSymlink(from, to string) error {
 	if err := mkdirAllNoSymlink(filepath.Dir(from), 0o700); err != nil {
 		return fmt.Errorf("mkdir profile config dir: %w", err)
 	}
-	if err := createProjectsLink(to, from); err != nil {
+	if err := createProjectsLinkFunc(to, from); err != nil {
 		return fmt.Errorf("create symlink: %w", err)
 	}
 

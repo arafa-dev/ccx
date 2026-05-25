@@ -1,11 +1,15 @@
 package cli_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/arafa-dev/ccx/internal/contracts"
+	"github.com/arafa-dev/ccx/internal/profile"
 )
 
 func TestUsageEmpty(t *testing.T) {
@@ -58,7 +62,13 @@ func TestUsageIngestsEventsForRegisteredProfile(t *testing.T) {
 	if err := os.WriteFile(sessionPath, []byte(session), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runCLI(t, "profile", "add", "work", "--config-dir", cfgDir)
+	mgr, err := profile.NewManager(filepath.Join(home, ".ccx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Add(context.Background(), contracts.Profile{Name: "work", ConfigDir: cfgDir}); err != nil {
+		t.Fatal(err)
+	}
 
 	out := runCLI(t, "usage", "--since", "365d")
 	if !strings.Contains(out, "work") {
