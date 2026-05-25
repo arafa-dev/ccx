@@ -24,6 +24,14 @@ type Store interface {
 	QuerySessions(ctx context.Context, q contracts.SessionQuery) ([]contracts.SessionTelemetry, error)
 	QueryRecentFailures(ctx context.Context, profileName string, since time.Time) ([]contracts.HookEvent, error)
 	GetProfileHealth(ctx context.Context, profileName string) (contracts.ProfileHealth, error)
+
+	// QueryTurnsInWindow returns the number of completed turns for a profile
+	// in the given interval.
+	QueryTurnsInWindow(ctx context.Context, profileName string, since, until time.Time) (int, error)
+
+	// QueryOldestTurnInWindow returns the timestamp of the earliest turn for a
+	// profile inside the interval, or the zero time if none.
+	QueryOldestTurnInWindow(ctx context.Context, profileName string, since, until time.Time) (time.Time, error)
 }
 
 // Options controls evaluation gates.

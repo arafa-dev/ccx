@@ -222,6 +222,14 @@ func (m *mockStore) QueryRecentFailures(context.Context, string, time.Time) ([]c
 	return nil, nil
 }
 
+func (m *mockStore) QueryTurnsInWindow(context.Context, string, time.Time, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (m *mockStore) QueryOldestTurnInWindow(context.Context, string, time.Time, time.Time) (time.Time, error) {
+	return time.Time{}, nil
+}
+
 func (m *mockStore) GetProfileHealth(context.Context, string) (contracts.ProfileHealth, error) {
 	return contracts.ProfileHealth{}, contracts.ErrProfileNotFound
 }

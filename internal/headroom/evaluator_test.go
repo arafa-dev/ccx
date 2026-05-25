@@ -304,6 +304,31 @@ func TestTieBreakersUsePriorityThenLowerUsageThenName(t *testing.T) {
 	}
 }
 
+func TestFakeStoreQueriesTurnsInWindow(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	store.addTurn("work", now.Add(-4*time.Hour))
+	store.addTurn("work", now.Add(-time.Hour))
+	store.addTurn("personal", now.Add(-time.Hour))
+	store.addTurn("work", now.Add(-6*time.Hour))
+
+	since := now.Add(-5 * time.Hour)
+	count, err := store.QueryTurnsInWindow(context.Background(), "work", since, now)
+	if err != nil {
+		t.Fatalf("QueryTurnsInWindow: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2", count)
+	}
+	oldest, err := store.QueryOldestTurnInWindow(context.Background(), "work", since, now)
+	if err != nil {
+		t.Fatalf("QueryOldestTurnInWindow: %v", err)
+	}
+	if want := now.Add(-4 * time.Hour); !oldest.Equal(want) {
+		t.Fatalf("oldest = %s, want %s", oldest, want)
+	}
+}
+
 func evaluate(t *testing.T, store *fakeStore, profiles []contracts.Profile) headroom.Result {
 	t.Helper()
 	return evaluateWithOptions(t, store, profiles, headroom.Options{})
@@ -363,6 +388,7 @@ func testNow() time.Time {
 type fakeStore struct {
 	now      time.Time
 	usage    []usageEvent
+	turns    []turnEvent
 	failures map[string][]contracts.HookEvent
 	sessions map[string][]contracts.SessionTelemetry
 	health   map[string]contracts.ProfileHealth
@@ -373,6 +399,11 @@ type usageEvent struct {
 	at      time.Time
 	model   string
 	usage   contracts.Usage
+}
+
+type turnEvent struct {
+	profile string
+	at      time.Time
 }
 
 func newFakeStore(now time.Time) *fakeStore {
@@ -398,6 +429,10 @@ func (s *fakeStore) addWorkSession(session contracts.SessionTelemetry) {
 	s.sessions["work"] = append(s.sessions["work"], session)
 }
 
+func (s *fakeStore) addTurn(profile string, at time.Time) {
+	s.turns = append(s.turns, turnEvent{profile: profile, at: at})
+}
+
 func (s *fakeStore) QueryUsage(_ context.Context, q contracts.UsageQuery) ([]contracts.UsageRow, error) {
 	var rows []contracts.UsageRow
 	for _, ev := range s.usage {
@@ -418,6 +453,36 @@ func (s *fakeStore) QueryUsage(_ context.Context, q contracts.UsageQuery) ([]con
 		})
 	}
 	return rows, nil
+}
+
+func (s *fakeStore) QueryTurnsInWindow(_ context.Context, profile string, since, until time.Time) (int, error) {
+	n := 0
+	for _, turn := range s.turns {
+		if turn.profile != profile {
+			continue
+		}
+		if turn.at.Before(since) || turn.at.After(until) {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
+func (s *fakeStore) QueryOldestTurnInWindow(_ context.Context, profile string, since, until time.Time) (time.Time, error) {
+	var oldest time.Time
+	for _, turn := range s.turns {
+		if turn.profile != profile {
+			continue
+		}
+		if turn.at.Before(since) || turn.at.After(until) {
+			continue
+		}
+		if oldest.IsZero() || turn.at.Before(oldest) {
+			oldest = turn.at
+		}
+	}
+	return oldest, nil
 }
 
 func (s *fakeStore) QueryRecentFailures(_ context.Context, profileName string, since time.Time) ([]contracts.HookEvent, error) {
