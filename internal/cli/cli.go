@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/arafa-dev/ccx/internal/daemon"
+	"github.com/arafa-dev/ccx/internal/run"
 	"github.com/spf13/cobra"
 )
 
@@ -61,6 +62,10 @@ func Run(ctx context.Context, opts Options) int {
 		root.SetIn(opts.Stdin)
 	}
 	if err := root.ExecuteContext(ctx); err != nil {
+		var coded run.ExitCodeError
+		if errors.As(err, &coded) {
+			return coded.Code
+		}
 		var structured *structuredCLIError
 		if !errors.As(err, &structured) {
 			_, _ = fmt.Fprintf(opts.Stderr, "Error: %s\n", err)
@@ -97,6 +102,7 @@ func newRootCommand(opts *Options) *cobra.Command {
 		newInitCommand(opts),
 		newUsageCommand(opts),
 		newSuggestCommand(opts),
+		newRunCommand(opts),
 		newDashboardCommand(opts),
 		newDaemonCommand(opts),
 		newDoctorCommand(opts),
