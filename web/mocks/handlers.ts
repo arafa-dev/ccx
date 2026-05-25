@@ -80,6 +80,16 @@ export const handlers = [
     });
   }),
 
+  http.get(apiRoute('/api/recommendations/live'), () =>
+    new HttpResponse('', {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    }),
+  ),
+
   http.get(apiRoute('/api/daemon/status'), () =>
     HttpResponse.json(FIXTURE_DAEMON_STATUS),
   ),
