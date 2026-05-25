@@ -23,6 +23,17 @@ const maxLineBytes = 16 * 1024 * 1024 // 16 MiB
 // case it restarts from offset 0. It returns the new end-of-file offset and
 // the current inode. Per-line parse failures are logged via slog and skipped.
 func readFile(ctx context.Context, path, project string, cursor Cursor, out chan<- contracts.Event) (end int64, inode uint64, err error) {
+	return readFileWithEmit(ctx, path, project, cursor, func(ev contracts.Event) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case out <- ev:
+			return nil
+		}
+	})
+}
+
+func readFileWithEmit(ctx context.Context, path, project string, cursor Cursor, emit func(contracts.Event) error) (end int64, inode uint64, err error) {
 	f, err := os.Open(path) // #nosec G304 -- scanner intentionally reads profile JSONL paths.
 	if err != nil {
 		return 0, 0, fmt.Errorf("open %q: %w", path, err)
@@ -84,10 +95,8 @@ func readFile(ctx context.Context, path, project string, cursor Cursor, out chan
 			continue
 		}
 
-		select {
-		case <-ctx.Done():
-			return pos, inode, ctx.Err()
-		case out <- ev:
+		if err := emit(ev); err != nil {
+			return pos, inode, err
 		}
 
 		if err != nil {
