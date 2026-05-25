@@ -12,11 +12,13 @@ import {
   getProfiles,
   getSessions,
   getUsage,
+  streamRecommendations,
   streamUsage,
   type HeadroomResponse,
   type HookStatus,
   type ProfileWithTotals,
   type ProfileQuota,
+  type RecommendationEvent,
   type SessionTelemetry,
   type UsageResponse,
   type UsageRow,
@@ -175,6 +177,7 @@ vi.mock('@/lib/api', async () => {
     getSessions: vi.fn(async () => sessions),
     getHooksStatus: vi.fn(async () => hooks),
     getQuota: vi.fn(async () => quotas),
+    streamRecommendations: vi.fn(() => () => {}),
     streamUsage: vi.fn(() => () => {}),
   };
 });
@@ -199,6 +202,7 @@ describe('<Dashboard>', () => {
     vi.mocked(getSessions).mockImplementation(async () => sessions);
     vi.mocked(getHooksStatus).mockImplementation(async () => hooks);
     vi.mocked(getQuota).mockImplementation(async () => quotas);
+    vi.mocked(streamRecommendations).mockImplementation(() => () => {});
     vi.mocked(streamUsage).mockImplementation(() => () => {});
   });
 
@@ -443,6 +447,63 @@ describe('<Dashboard>', () => {
     );
 
     expect(await screen.findByText(/plan quota/i)).toBeInTheDocument();
+  });
+
+  it('renders live recommendation events and switches to the suggested profile', async () => {
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    await screen.findByRole('region', { name: /recommended profile/i });
+    const onRecommendation = vi.mocked(streamRecommendations).mock.calls[0]?.[0];
+    expect(onRecommendation).toBeDefined();
+
+    const event: RecommendationEvent = {
+      profile: 'personal',
+      level: 'hard',
+      reason: '5h quota has reached the hard cap',
+      suggested: 'work',
+      quota_5h_pct: 100,
+      quota_weekly_pct: 42,
+      timestamp: '2026-05-25T10:00:00Z',
+    };
+
+    await act(async () => {
+      onRecommendation?.(event);
+    });
+
+    const banner = screen.getByRole('status');
+    expect(within(banner).getByText('Hard limit')).toBeInTheDocument();
+    expect(within(banner).getByText('personal')).toBeInTheDocument();
+    expect(within(banner).getByText('5h quota has reached the hard cap')).toBeInTheDocument();
+
+    await userEvent.click(within(banner).getByRole('button', { name: /switch to work/i }));
+
+    await waitFor(() => {
+      const topProjects = screen.getByRole('region', { name: /top projects/i });
+      expect(within(topProjects).getByText('acme')).toBeInTheDocument();
+      expect(within(topProjects).queryByText('hobby')).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not let recommendation stream disconnects change the usage live indicator', async () => {
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByLabelText(/live updates connected/i)).toBeInTheDocument();
+    const onRecommendationDisconnect = vi.mocked(streamRecommendations).mock.calls[0]?.[1];
+    expect(onRecommendationDisconnect).toBeDefined();
+
+    await act(async () => {
+      onRecommendationDisconnect?.();
+    });
+
+    expect(screen.getByLabelText(/live updates connected/i)).toBeInTheDocument();
   });
 
   it('filters the quota panel when picker changes', async () => {
