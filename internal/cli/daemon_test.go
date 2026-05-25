@@ -369,7 +369,7 @@ func (f *cliFakeProcess) StartDetached(_ context.Context, spec *daemon.StartProc
 		}
 	}
 	go func() {
-		time.Sleep(5 * time.Millisecond)
+		waitForChildPID(spec.Root, pid)
 		writeDaemonRuntimeLocked(spec.Root, contracts.DaemonStatus{
 			PID:             pid,
 			Version:         spec.Version,
@@ -426,6 +426,21 @@ func writeDaemonRuntimeLocked(root string, status contracts.DaemonStatus) {
 			"created_at":       time.Now().UTC(),
 		})
 		_ = os.WriteFile(paths.LockPath, append(lockData, '\n'), 0o600)
+	}
+}
+
+func waitForChildPID(root string, pid int) {
+	paths := daemon.RuntimePaths(root)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var lock struct {
+			ChildPID int `json:"child_pid"`
+		}
+		data, err := os.ReadFile(paths.LockPath) //nolint:gosec // daemon test root is controlled by the test.
+		if err == nil && json.Unmarshal(data, &lock) == nil && lock.ChildPID == pid {
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
