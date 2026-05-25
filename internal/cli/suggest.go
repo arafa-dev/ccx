@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"text/tabwriter"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
@@ -157,20 +158,44 @@ func renderSuggest(w io.Writer, result headroom.Result) error {
 	_, _ = fmt.Fprintf(w, "\nSuggested command: ccx use %s\n\n", rec.Profile)
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "PROFILE\tAVAILABLE\tSCORE\tHEADROOM\tAUTH\tREASONS")
+	_, _ = fmt.Fprintln(tw, "PROFILE\tAVAILABLE\tSCORE\tHEADROOM\t5H\tWEEKLY\tAUTH\tREASONS")
 	for i := range result.Candidates {
 		c := &result.Candidates[i]
 		_, _ = fmt.Fprintf(
-			tw, "%s\t%t\t%.1f\t%.1f%%\t%s\t%s\n",
+			tw, "%s\t%t\t%.1f\t%.1f%%\t%s\t%s\t%s\t%s\n",
 			c.Profile,
 			c.Available,
 			c.Score,
 			c.HeadroomPercent,
+			formatSuggestQuotaWindow(c.Quota5h),
+			formatSuggestQuotaWindow(c.QuotaWeekly),
 			c.AuthStatus,
 			firstReason(c.Reasons),
 		)
 	}
 	return tw.Flush()
+}
+
+func formatSuggestQuotaWindow(w *contracts.QuotaWindow) string {
+	if w == nil || w.Cap == 0 {
+		return "—"
+	}
+	suffix := ""
+	if w.Pct >= 100 {
+		suffix = " ⛔"
+	}
+	return fmt.Sprintf("%d/%d (%s)%s", w.Used, w.Cap, formatSuggestQuotaPct(w.Pct), suffix)
+}
+
+func formatSuggestQuotaPct(pct float64) string {
+	if pct >= 100 {
+		return "100%"
+	}
+	pct = math.Floor(pct*10) / 10
+	if pct >= 100 {
+		pct = 99.9
+	}
+	return fmt.Sprintf("%.1f%%", pct)
 }
 
 func firstReason(reasons []string) string {
