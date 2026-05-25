@@ -1,3 +1,6 @@
+<!-- markdownlint-disable MD013 MD040 MD049 -->
+<!-- cspell:ignore predev rescans upserted upserts -->
+
 # AGENTS.md
 
 Operational guide for AI coding agents (Codex, Claude, Cursor, etc.) working on

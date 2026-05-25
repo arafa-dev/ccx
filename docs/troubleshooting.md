@@ -137,6 +137,14 @@ Common reasons:
 `ccx suggest` is advisory: it prints a suggested `ccx use <name>` command but
 does not switch accounts automatically.
 
+## `ccx run --supervise` did not swap immediately
+
+The supervisor waits for Claude Code's next `Stop` hook before relaunching, so
+the active turn can finish cleanly. By default ccx polls local hook telemetry
+every 2 seconds; this can delay the swap by up to one poll interval after the
+hook lands. Lower `--poll-interval` only if you need tighter feedback, and keep
+it above 250ms to avoid hammering SQLite.
+
 ## Cost numbers look wrong
 
 ccx ships an embedded pricing table that's accurate as of the version's release

@@ -77,5 +77,13 @@ func (a *storeCursorAdapter) Get(ctx context.Context, profileName, file string) 
 }
 
 func (a *storeCursorAdapter) Set(ctx context.Context, profileName, file string, c scanner.Cursor) error {
+	if profileName == scanner.SharedCursorProfile {
+		if err := a.store.SaveProfile(ctx, contracts.Profile{
+			Name:      scanner.SharedCursorProfile,
+			ConfigDir: filepath.Dir(filepath.Dir(file)),
+		}); err != nil {
+			return err
+		}
+	}
 	return a.store.SetCursor(ctx, profileName, file, c.Offset, c.Inode)
 }

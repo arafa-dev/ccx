@@ -102,6 +102,7 @@ func newRootCommand(opts *Options) *cobra.Command {
 		newInitCommand(opts),
 		newUsageCommand(opts),
 		newSuggestCommand(opts),
+		newMigrateSharedHistoryCommand(opts),
 		newRunCommand(opts),
 		newDashboardCommand(opts),
 		newDaemonCommand(opts),

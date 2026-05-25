@@ -73,63 +73,7 @@ func newSuggestCommand(_ *Options) *cobra.Command {
 }
 
 func ingestSuggestProfiles(ctx context.Context, deps *Deps, profiles []contracts.Profile) (map[string]string, error) {
-	failures := make(map[string]string)
-	for i := range profiles {
-		p := &profiles[i]
-		if err := deps.Store.SaveProfile(ctx, *p); err != nil {
-			return nil, fmt.Errorf("saving profile %q before scan: %w", p.Name, err)
-		}
-		if err := ingestSuggestProfile(ctx, deps, p); err != nil {
-			failures[p.Name] = fmt.Sprintf("scan failed: %v", err)
-		}
-	}
-	return failures, nil
-}
-
-func ingestSuggestProfile(ctx context.Context, deps *Deps, p *contracts.Profile) error {
-	events, errs := deps.Scanner.Scan(ctx, *p)
-	batch := make([]contracts.Event, 0, 256)
-	flush := func() error {
-		if len(batch) == 0 {
-			return nil
-		}
-		if err := deps.Store.InsertEvents(ctx, p.Name, batch); err != nil {
-			return err
-		}
-		batch = batch[:0]
-		return nil
-	}
-
-	var scanErr error
-	for events != nil || errs != nil {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case ev, ok := <-events:
-			if !ok {
-				events = nil
-				if err := flush(); err != nil {
-					return err
-				}
-				continue
-			}
-			batch = append(batch, ev)
-			if len(batch) >= cap(batch) {
-				if err := flush(); err != nil {
-					return err
-				}
-			}
-		case err, ok := <-errs:
-			if !ok {
-				errs = nil
-				continue
-			}
-			if err != nil && scanErr == nil {
-				scanErr = err
-			}
-		}
-	}
-	return scanErr
+	return ingestSharedAwareSuggestProfiles(ctx, deps, profiles)
 }
 
 func writeSuggestError(c *cobra.Command, asJSON bool, message string) error {
