@@ -1,0 +1,6 @@
+function claude {
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
+    $ccx = Get-Command ccx -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $ccx) { $ccx = Get-Command ccx.exe -CommandType Application }
+    & $ccx.Path run -- @Args
+}

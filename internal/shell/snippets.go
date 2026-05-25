@@ -70,3 +70,39 @@ const initPowerShell = `function ccx {
     }
 }
 `
+
+const claudeWrapperPosix = `claude() {
+  command ccx run -- "$@"
+}
+`
+
+// EmitClaudeWrapperPosix returns the zsh/bash snippet that routes `claude`
+// invocations through `ccx run`.
+func EmitClaudeWrapperPosix() string {
+	return claudeWrapperPosix
+}
+
+const claudeWrapperFish = `function claude
+    command ccx run -- $argv
+end
+`
+
+// EmitClaudeWrapperFish returns the fish snippet that routes `claude`
+// invocations through `ccx run`.
+func EmitClaudeWrapperFish() string {
+	return claudeWrapperFish
+}
+
+const claudeWrapperPowerShell = `function claude {
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
+    $ccx = Get-Command ccx -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $ccx) { $ccx = Get-Command ccx.exe -CommandType Application }
+    & $ccx.Path run -- @Args
+}
+`
+
+// EmitClaudeWrapperPowerShell returns the PowerShell snippet that routes
+// `claude` invocations through `ccx run`.
+func EmitClaudeWrapperPowerShell() string {
+	return claudeWrapperPowerShell
+}
