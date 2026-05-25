@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Footer } from './footer';
 import { Header, type LiveStatus } from './header';
 import { ProfileCards } from './profile-cards';
+import { QuotaPanel } from './quota-panel';
 import { RecentSessions } from './recent-sessions';
 import { RecommendationPanel } from './recommendation-panel';
 import { TimeSeriesChart } from './time-series-chart';
@@ -13,6 +14,7 @@ import {
   getHeadroom,
   getHealth,
   getHooksStatus,
+  getQuota,
   getProfiles,
   getSessions,
   getUsage,
@@ -21,6 +23,7 @@ import {
   type HeadroomResponse,
   type HookStatus,
   type ProfileWithTotals,
+  type ProfileQuota,
   type SessionTelemetry,
   type UsageRow,
 } from '@/lib/api';
@@ -42,6 +45,7 @@ export function Dashboard() {
   const [daemonStatus, setDaemonStatus] = useState<DaemonStatus | null>(null);
   const [headroom, setHeadroom] = useState<HeadroomResponse | null>(null);
   const [hookStatuses, setHookStatuses] = useState<HookStatus[]>([]);
+  const [quotas, setQuotas] = useState<ProfileQuota[]>([]);
   const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [live, setLive] = useState<LiveStatus>('connecting');
@@ -55,19 +59,21 @@ export function Dashboard() {
 
   const refreshAll = useCallback(async (profile: string | null) => {
     try {
-      const [p, u, d, h, sessionRows, hookRows] = await Promise.all([
+      const [p, u, d, h, sessionRows, hookRows, quotaRows] = await Promise.all([
         getProfiles(),
         getUsage(usageParams(profile)),
         getDaemonStatus(),
         getHeadroom(),
         getSessions(sessionParams(profile)),
         getHooksStatus(),
+        getQuota(),
       ]);
       setProfiles(p);
       setProfilesLoaded(true);
       setDaemonStatus(d);
       setHeadroom(h);
       setHookStatuses(hookRows);
+      setQuotas(quotaRows);
       if (selectedProfileRef.current === profile) {
         setUsageRows(u.rows);
         setSessions(sessionRows);
@@ -151,15 +157,17 @@ export function Dashboard() {
     lastLiveMetadataRefreshAt.current = now;
     const profile = selectedProfileRef.current;
     try {
-      const [d, h, sessionRows, hookRows] = await Promise.all([
+      const [d, h, sessionRows, hookRows, quotaRows] = await Promise.all([
         getDaemonStatus(),
         getHeadroom(),
         getSessions(sessionParams(profile)),
         getHooksStatus(),
+        getQuota(),
       ]);
       setDaemonStatus(d);
       setHeadroom(h);
       setHookStatuses(hookRows);
+      setQuotas(quotaRows);
       if (selectedProfileRef.current === profile) {
         setSessions(sessionRows);
         setLoadError(null);
@@ -215,6 +223,9 @@ export function Dashboard() {
   }, [refreshLiveUsage, refreshLiveMetadata]);
 
   const profileMeta = profiles.map((p) => ({ name: p.name, color: p.color }));
+  const visibleQuotas = selectedProfile
+    ? quotas.filter((quota) => quota.profile === selectedProfile)
+    : quotas;
 
   return (
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col">
@@ -247,6 +258,7 @@ export function Dashboard() {
               candidates={headroom?.candidates ?? []}
               hookStatuses={hookStatuses}
             />
+            <QuotaPanel quotas={visibleQuotas} />
             <RecommendationPanel headroom={headroom} />
             <TimeSeriesChart usageRows={usageRows} profiles={profileMeta} />
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

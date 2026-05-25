@@ -8,6 +8,7 @@ import {
   getHealth,
   getHeadroom,
   getHooksStatus,
+  getQuota,
   getProfiles,
   getSessions,
   getUsage,
@@ -15,6 +16,7 @@ import {
   type HeadroomResponse,
   type HookStatus,
   type ProfileWithTotals,
+  type ProfileQuota,
   type SessionTelemetry,
   type UsageResponse,
   type UsageRow,
@@ -133,6 +135,26 @@ const hooks: HookStatus[] = [
   },
 ];
 
+const quotas: ProfileQuota[] = [
+  {
+    profile: 'work',
+    plan_tier: 'max20',
+    window_5h: { used: 142, cap: 900, pct: 15.78, resets_at: '2026-05-24T19:00:00Z' },
+    window_weekly: {
+      used: 1203,
+      cap: 4500,
+      pct: 26.73,
+      resets_at: '2026-05-31T00:00:00Z',
+    },
+  },
+  {
+    profile: 'personal',
+    plan_tier: 'pro',
+    window_5h: { used: 45, cap: 45, pct: 100, resets_at: '2026-05-24T18:50:00Z' },
+    window_weekly: { used: 0, cap: 0, pct: 0, resets_at: '1970-01-01T00:00:00Z' },
+  },
+];
+
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('@/lib/api');
   return {
@@ -152,6 +174,7 @@ vi.mock('@/lib/api', async () => {
     getHeadroom: vi.fn(async () => headroom),
     getSessions: vi.fn(async () => sessions),
     getHooksStatus: vi.fn(async () => hooks),
+    getQuota: vi.fn(async () => quotas),
     streamUsage: vi.fn(() => () => {}),
   };
 });
@@ -175,6 +198,7 @@ describe('<Dashboard>', () => {
     vi.mocked(getHeadroom).mockImplementation(async () => headroom);
     vi.mocked(getSessions).mockImplementation(async () => sessions);
     vi.mocked(getHooksStatus).mockImplementation(async () => hooks);
+    vi.mocked(getQuota).mockImplementation(async () => quotas);
     vi.mocked(streamUsage).mockImplementation(() => () => {});
   });
 
@@ -238,7 +262,7 @@ describe('<Dashboard>', () => {
     });
   });
 
-  it('fetches daemon, headroom, sessions, hooks, profiles, and usage for the dashboard', async () => {
+  it('fetches daemon, headroom, sessions, hooks, quota, profiles, and usage for the dashboard', async () => {
     render(
       <ThemeProvider>
         <Dashboard />
@@ -250,6 +274,7 @@ describe('<Dashboard>', () => {
     expect(getHeadroom).toHaveBeenCalledOnce();
     expect(getSessions).toHaveBeenCalledWith({ since: '7d' });
     expect(getHooksStatus).toHaveBeenCalledOnce();
+    expect(getQuota).toHaveBeenCalledOnce();
     expect(getProfiles).toHaveBeenCalledOnce();
     expect(getUsage).toHaveBeenCalledWith({ profile: undefined, since: '7d' });
   });
@@ -277,6 +302,7 @@ describe('<Dashboard>', () => {
     expect(getHeadroom).toHaveBeenCalledOnce();
     expect(getHooksStatus).toHaveBeenCalledOnce();
     expect(getSessions).toHaveBeenCalledOnce();
+    expect(getQuota).toHaveBeenCalledOnce();
   });
 
   it('throttles expensive metadata refreshes during live usage SSE ticks', async () => {
@@ -297,6 +323,7 @@ describe('<Dashboard>', () => {
     vi.mocked(getHeadroom).mockClear();
     vi.mocked(getHooksStatus).mockClear();
     vi.mocked(getSessions).mockClear();
+    vi.mocked(getQuota).mockClear();
 
     await act(async () => {
       onUsage?.([]);
@@ -306,6 +333,7 @@ describe('<Dashboard>', () => {
     expect(getHeadroom).not.toHaveBeenCalled();
     expect(getHooksStatus).not.toHaveBeenCalled();
     expect(getSessions).not.toHaveBeenCalled();
+    expect(getQuota).not.toHaveBeenCalled();
 
     await act(async () => {
       vi.setSystemTime(new Date('2026-05-19T12:01:01Z'));
@@ -316,6 +344,7 @@ describe('<Dashboard>', () => {
     expect(getHeadroom).toHaveBeenCalledOnce();
     expect(getHooksStatus).toHaveBeenCalledOnce();
     expect(getSessions).toHaveBeenCalledWith({ since: '7d' });
+    expect(getQuota).toHaveBeenCalledOnce();
   });
 
   it('skips overlapping live usage refreshes while one is in flight', async () => {
@@ -404,5 +433,34 @@ describe('<Dashboard>', () => {
       'ccx',
     );
     expect(screen.getByText(/hooks installed/i)).toBeInTheDocument();
+  });
+
+  it('renders the quota panel when quotas are loaded', async () => {
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText(/plan quota/i)).toBeInTheDocument();
+  });
+
+  it('filters the quota panel when picker changes', async () => {
+    render(
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>,
+    );
+
+    const quotaPanel = await screen.findByRole('region', { name: /plan quota/i });
+    await waitFor(() => expect(within(quotaPanel).getByText('personal')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /filter/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /^work$/i }));
+
+    await waitFor(() => {
+      expect(within(quotaPanel).getByText('work')).toBeInTheDocument();
+      expect(within(quotaPanel).queryByText('personal')).not.toBeInTheDocument();
+    });
   });
 });
