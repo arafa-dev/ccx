@@ -76,6 +76,9 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if rows == nil {
+		rows = []contracts.UsageRow{}
+	}
 	for i := range rows {
 		cost, err := s.deps.Pricing.Cost(rows[i].Model, rows[i].Day, rows[i].Usage)
 		if err != nil {
