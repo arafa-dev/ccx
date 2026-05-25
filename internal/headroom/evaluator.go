@@ -170,6 +170,16 @@ func (e Evaluator) evaluateProfile(ctx context.Context, p *contracts.Profile, no
 	failurePenalty := e.applyFailureGates(&c, p, failures, sessions, health, haveHealth, now, opts.IncludeUnavailable)
 
 	c.HeadroomPercent = headroomPercent(&p.Limits, usage)
+	if c.Quota5h != nil && PressureLevelFromPct(c.Quota5h.Pct) >= PressureSoft {
+		if h := 100 - c.Quota5h.Pct; h < c.HeadroomPercent {
+			c.HeadroomPercent = round2(h)
+		}
+	}
+	if c.QuotaWeekly != nil && PressureLevelFromPct(c.QuotaWeekly.Pct) >= PressureSoft {
+		if h := 100 - c.QuotaWeekly.Pct; h < c.HeadroomPercent {
+			c.HeadroomPercent = round2(h)
+		}
+	}
 	if hasBudget(&p.Limits) {
 		c.Reasons = append(c.Reasons, budgetReasons(&p.Limits, usage)...)
 	} else {

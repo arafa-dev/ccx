@@ -382,6 +382,47 @@ func TestEvaluateOmitsQuotaFieldsWhenPlanTierOptOut(t *testing.T) {
 	}
 }
 
+func TestHeadroomPercentIncludesQuota(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	seedTurns(store, "hot", 855, 855)
+	seedTurns(store, "cold", 180, 180)
+
+	result := evaluate(t, store, []contracts.Profile{
+		profile("hot", contracts.ProfileLimits{PlanTier: "max20"}),
+		profile("cold", contracts.ProfileLimits{PlanTier: "max20"}),
+	})
+	hot := mustCandidate(t, result, "hot")
+	cold := mustCandidate(t, result, "cold")
+	if hot.HeadroomPercent != 5 {
+		t.Errorf("hot HeadroomPercent = %v, want 5 from soft 5h pressure", hot.HeadroomPercent)
+	}
+	if cold.HeadroomPercent != 100 {
+		t.Errorf("cold HeadroomPercent = %v, want unchanged below warn/soft pressure", cold.HeadroomPercent)
+	}
+}
+
+func TestHeadroomPercentIncludesWeeklyQuota(t *testing.T) {
+	now := testNow()
+	store := newFakeStore(now)
+	seedTurns(store, "weekly-hot", 10, 950)
+	seedTurns(store, "weekly-cold", 10, 200)
+
+	limits := contracts.ProfileLimits{PlanTier: "max20", CapsWeeklyTurns: 1000}
+	result := evaluate(t, store, []contracts.Profile{
+		profile("weekly-hot", limits),
+		profile("weekly-cold", limits),
+	})
+	hot := mustCandidate(t, result, "weekly-hot")
+	cold := mustCandidate(t, result, "weekly-cold")
+	if hot.HeadroomPercent != 5 {
+		t.Errorf("hot HeadroomPercent = %v, want 5 from soft weekly pressure", hot.HeadroomPercent)
+	}
+	if cold.HeadroomPercent != 100 {
+		t.Errorf("cold HeadroomPercent = %v, want unchanged below warn/soft pressure", cold.HeadroomPercent)
+	}
+}
+
 func evaluate(t *testing.T, store *fakeStore, profiles []contracts.Profile) headroom.Result {
 	t.Helper()
 	return evaluateWithOptions(t, store, profiles, headroom.Options{})
