@@ -131,6 +131,7 @@ func (s *Server) routes() {
 	s.mux.Get("/api/sessions", s.handleSessions)
 	s.mux.Get("/api/headroom", s.handleHeadroom)
 	s.mux.Get("/api/quota", s.handleQuota)
+	s.mux.Get("/api/recommendations/live", s.handleRecommendationsLive)
 	if s.deps.WebRoot != nil {
 		s.mux.Handle("/*", http.FileServer(s.deps.WebRoot))
 	}
