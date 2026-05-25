@@ -38,3 +38,20 @@ func TestInitUnknownShellErrors(t *testing.T) {
 		t.Errorf("expected 'unknown shell' in stderr: %q", stderr.String())
 	}
 }
+
+func TestInitWithClaudeWrapperPosix(t *testing.T) {
+	s := runCLI(t, "init", "zsh", "--with-claude-wrapper")
+	if !strings.Contains(s, "claude()") {
+		t.Errorf("expected claude() wrapper; got:\n%s", s)
+	}
+	if !strings.Contains(s, "ccx run --") {
+		t.Errorf("expected `ccx run --` in wrapper; got:\n%s", s)
+	}
+}
+
+func TestInitWithoutFlagOmitsWrapper(t *testing.T) {
+	s := runCLI(t, "init", "zsh")
+	if strings.Contains(s, "claude()") {
+		t.Errorf("default init should not include claude wrapper:\n%s", s)
+	}
+}

@@ -9,7 +9,8 @@ import (
 )
 
 func newInitCommand(_ *Options) *cobra.Command {
-	return &cobra.Command{
+	var withClaudeWrapper bool
+	cmd := &cobra.Command{
 		Use:   "init <shell>",
 		Short: "Print the rc-file snippet for the given shell",
 		Long:  "Supported shells: zsh, bash, fish, pwsh",
@@ -19,7 +20,12 @@ func newInitCommand(_ *Options) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("%w: %q", contracts.ErrUnknownShell, args[0])
 			}
-			script, err := shell.New().EmitInitScript(sh)
+			emitter := shell.New()
+			emitInitScript := emitter.EmitInitScript
+			if withClaudeWrapper {
+				emitInitScript = emitter.EmitInitScriptWithClaude
+			}
+			script, err := emitInitScript(sh)
 			if err != nil {
 				return err
 			}
@@ -27,4 +33,6 @@ func newInitCommand(_ *Options) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&withClaudeWrapper, "with-claude-wrapper", false, "additionally emit a claude wrapper that calls ccx run --")
+	return cmd
 }
