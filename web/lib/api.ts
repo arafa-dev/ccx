@@ -12,6 +12,7 @@ export type HeadroomCandidate = components['schemas']['HeadroomCandidate'];
 export type HeadroomResponse = components['schemas']['HeadroomResponse'];
 export type QuotaWindow = components['schemas']['QuotaWindow'];
 export type ProfileQuota = components['schemas']['ProfileQuota'];
+export type RecommendationEvent = components['schemas']['RecommendationEvent'];
 
 export interface HealthResponse {
   ok: boolean;
@@ -140,6 +141,31 @@ export function streamUsage(
   return () => es.close();
 }
 
+/**
+ * streamRecommendations opens an SSE connection to /api/recommendations/live
+ * and invokes onEvent for each recommendation event. Malformed payloads are
+ * ignored because the next SSE event may still be valid.
+ */
+export function streamRecommendations(
+  onEvent: (event: RecommendationEvent) => void,
+  onDisconnect: () => void,
+): () => void {
+  const url = `${apiBaseUrl()}/api/recommendations/live`;
+  const es = new EventSource(url);
+  es.addEventListener('recommendation', (ev) => {
+    try {
+      const parsed = JSON.parse((ev as MessageEvent).data) as RecommendationEvent;
+      onEvent(parsed);
+    } catch {
+      // Ignore malformed SSE payloads.
+    }
+  });
+  es.onerror = () => {
+    onDisconnect();
+  };
+  return () => es.close();
+}
+
 // Compile-time check: ensure manual response shapes stay aligned with OpenAPI.
 type _HealthCheck =
   paths['/api/health']['get']['responses']['200']['content']['application/json'];
@@ -157,6 +183,8 @@ type _HeadroomCheck =
   paths['/api/headroom']['get']['responses']['200']['content']['application/json'];
 type _QuotaCheck =
   paths['/api/quota']['get']['responses']['200']['content']['application/json'];
+type _RecommendationsLiveCheck =
+  paths['/api/recommendations/live']['get']['responses']['200']['content']['text/event-stream'];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _Assert = [
   _HealthCheck,
@@ -167,4 +195,5 @@ type _Assert = [
   _SessionsCheck,
   _HeadroomCheck,
   _QuotaCheck,
+  _RecommendationsLiveCheck,
 ];
