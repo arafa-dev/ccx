@@ -10,6 +10,8 @@ export type HookStatus = components['schemas']['HookStatus'];
 export type SessionTelemetry = components['schemas']['SessionTelemetry'];
 export type HeadroomCandidate = components['schemas']['HeadroomCandidate'];
 export type HeadroomResponse = components['schemas']['HeadroomResponse'];
+export type QuotaWindow = components['schemas']['QuotaWindow'];
+export type ProfileQuota = components['schemas']['ProfileQuota'];
 
 export interface HealthResponse {
   ok: boolean;
@@ -104,6 +106,13 @@ export async function getHeadroom(): Promise<HeadroomResponse> {
   return getJSON<HeadroomResponse>('/api/headroom');
 }
 
+export async function getQuota(params: { profile?: string } = {}): Promise<ProfileQuota[]> {
+  const qs = new URLSearchParams();
+  if (params.profile) qs.set('profile', params.profile);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return getJSON<ProfileQuota[]>(`/api/quota${suffix}`);
+}
+
 /**
  * streamUsage opens an SSE connection to /api/usage/live and invokes onRows
  * for each emitted UsageRow array. Returns a teardown function.
@@ -146,6 +155,8 @@ type _SessionsCheck =
   paths['/api/sessions']['get']['responses']['200']['content']['application/json'];
 type _HeadroomCheck =
   paths['/api/headroom']['get']['responses']['200']['content']['application/json'];
+type _QuotaCheck =
+  paths['/api/quota']['get']['responses']['200']['content']['application/json'];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _Assert = [
   _HealthCheck,
@@ -155,4 +166,5 @@ type _Assert = [
   _HooksStatusCheck,
   _SessionsCheck,
   _HeadroomCheck,
+  _QuotaCheck,
 ];

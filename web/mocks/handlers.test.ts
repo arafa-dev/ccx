@@ -84,4 +84,21 @@ describe('MSW handlers cover every openapi.yaml endpoint', () => {
     expect(body.recommendation?.profile).toBeTruthy();
     expect(body.candidates.length).toBeGreaterThan(0);
   });
+
+  it('GET /api/quota', async () => {
+    const res = await fetch(`${base}/api/quota`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { profile: string; window_5h: { cap: number } }[];
+    expect(body.length).toBeGreaterThan(0);
+    expect(body[0]?.profile).toBeTruthy();
+    expect(typeof body[0]?.window_5h.cap).toBe('number');
+  });
+
+  it('GET /api/quota filters by profile', async () => {
+    const res = await fetch(`${base}/api/quota?profile=work`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { profile: string }[];
+    expect(body.length).toBeGreaterThan(0);
+    for (const row of body) expect(row.profile).toBe('work');
+  });
 });
