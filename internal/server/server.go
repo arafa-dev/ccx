@@ -27,6 +27,8 @@ type Deps struct {
 	Headroom HeadroomEvaluator
 	Ingestor HeadroomIngestor
 	Quota    QuotaProvider
+	// Recommendations streams pressure-driven profile recommendation events.
+	Recommendations RecommendationsSource
 }
 
 // ProfileLister exposes the subset of the profile manager the server needs.
@@ -58,6 +60,11 @@ type HeadroomIngestor interface {
 // is the value of the profile query parameter; empty means all profiles.
 type QuotaProvider interface {
 	Quota(ctx context.Context, profileFilter string) ([]contracts.ProfileQuota, error)
+}
+
+// RecommendationsSource provides per-request RecommendationEvent subscriptions.
+type RecommendationsSource interface {
+	Subscribe(ctx context.Context) <-chan contracts.RecommendationEvent
 }
 
 // Server is the local HTTP server.
