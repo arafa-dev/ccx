@@ -15,6 +15,7 @@ import (
 	"github.com/arafa-dev/ccx/internal/profile"
 	"github.com/arafa-dev/ccx/internal/quota"
 	"github.com/arafa-dev/ccx/internal/recstream"
+	"github.com/arafa-dev/ccx/internal/scanner"
 	"github.com/arafa-dev/ccx/internal/storage"
 )
 
@@ -56,6 +57,85 @@ func TestIngestProfileFlushesBufferedEventsBeforeScannerError(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].Usage.InputTokens != 100 {
 		t.Fatalf("usage rows = %+v, want flushed scanner event", rows)
+	}
+}
+
+func TestIngestAllProfilesUsesSharedProjectsAttribution(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := storage.NewStore(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	profiles, err := profile.NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	sharedRoot := filepath.Join(root, "shared-projects")
+	sessionPath := filepath.Join(sharedRoot, "sample-project", "s1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	session := `{"type":"assistant","uuid":"evt-shared-001","sessionId":"s1","timestamp":` +
+		`"` + time.Now().UTC().Format(time.RFC3339) + `",` +
+		`"message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":100,"output_tokens":50}}}` + "\n"
+	if err := os.WriteFile(sessionPath, []byte(session), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(root, "claude-work")
+	personalDir := filepath.Join(root, "claude-personal")
+	for _, dir := range []string{workDir, personalDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(sharedRoot, filepath.Join(dir, "projects")); err != nil {
+			t.Skipf("symlink creation unavailable on this host: %v", err)
+		}
+	}
+	for _, p := range []contracts.Profile{
+		{Name: "work", ConfigDir: workDir},
+		{Name: "personal", ConfigDir: personalDir},
+	} {
+		if err := profiles.Add(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SaveProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "SessionStart",
+		Timestamp: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := &runtimeDeps{
+		Store:    store,
+		Profiles: profiles,
+		Scanner:  scanner.NewScanner(&storeCursorAdapter{store: store}),
+	}
+	if _, err := ingestAllProfiles(ctx, deps); err != nil {
+		t.Fatalf("ingestAllProfiles: %v", err)
+	}
+
+	rows, err := store.QueryUsage(ctx, contracts.UsageQuery{})
+	if err != nil {
+		t.Fatalf("QueryUsage: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want one row attributed to session owner", rows)
+	}
+	if rows[0].Profile != "work" {
+		t.Fatalf("row profile = %q, want work", rows[0].Profile)
 	}
 }
 

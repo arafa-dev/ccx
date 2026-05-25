@@ -120,53 +120,7 @@ func ingestAllProfiles(ctx context.Context, deps *Deps) error {
 	if err != nil {
 		return err
 	}
-	for i := range profiles {
-		p := profiles[i]
-		if err := deps.Store.SaveProfile(ctx, p); err != nil {
-			return fmt.Errorf("saving profile %q before scan: %w", p.Name, err)
-		}
-		events, errs := deps.Scanner.Scan(ctx, p)
-		batch := make([]contracts.Event, 0, 256)
-		flush := func() error {
-			if len(batch) == 0 {
-				return nil
-			}
-			if err := deps.Store.InsertEvents(ctx, p.Name, batch); err != nil {
-				return err
-			}
-			batch = batch[:0]
-			return nil
-		}
-		for events != nil || errs != nil {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case ev, ok := <-events:
-				if !ok {
-					events = nil
-					if err := flush(); err != nil {
-						return err
-					}
-					continue
-				}
-				batch = append(batch, ev)
-				if len(batch) >= cap(batch) {
-					if err := flush(); err != nil {
-						return err
-					}
-				}
-			case err, ok := <-errs:
-				if !ok {
-					errs = nil
-					continue
-				}
-				if err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
+	return ingestSharedAwareProfiles(ctx, deps, profiles)
 }
 
 func renderUsageTable(w io.Writer, rows []contracts.UsageRow, total float64, window time.Duration) error {

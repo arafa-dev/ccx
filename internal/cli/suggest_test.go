@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/arafa-dev/ccx/internal/contracts"
 	"github.com/arafa-dev/ccx/internal/headroom"
 	"github.com/arafa-dev/ccx/internal/platform"
 	"github.com/arafa-dev/ccx/internal/profile"
+	"github.com/arafa-dev/ccx/internal/storage"
 )
 
 func TestProfileSetUpdatesOnlySuppliedFields(t *testing.T) {
@@ -174,6 +177,84 @@ func TestSuggestBestEffortIngestsAndEvaluatesInaccessibleProfile(t *testing.T) {
 	}
 	if !candidateHasReason(bad, "config dir inaccessible") && !candidateHasReason(bad, "scan failed") {
 		t.Fatalf("bad candidate reasons = %v, want config dir or scan failure", bad.Reasons)
+	}
+}
+
+func TestSuggestSharedProjectsAttributesUsageBeforeEvaluating(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	ccxHome := filepath.Join(home, ".ccx")
+	sharedRoot := filepath.Join(ccxHome, "shared-projects")
+	sessionPath := filepath.Join(sharedRoot, "sample-project", "s1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	session := `{"type":"assistant","uuid":"evt-shared-001","sessionId":"s1","timestamp":` +
+		`"` + time.Now().UTC().Format(time.RFC3339) + `",` +
+		`"message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":100,"output_tokens":50}}}` + "\n"
+	if err := os.WriteFile(sessionPath, []byte(session), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(home, "claude-work")
+	personalDir := filepath.Join(home, "claude-personal")
+	for _, dir := range []string{workDir, personalDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(sharedRoot, filepath.Join(dir, "projects")); err != nil {
+			t.Skipf("symlink creation unavailable on this host: %v", err)
+		}
+	}
+
+	mgr, err := profile.NewManager(ccxHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := []contracts.Profile{
+		{Name: "work", ConfigDir: workDir, Limits: contracts.ProfileLimits{DailyTokenBudget: 100, Priority: 10}},
+		{Name: "personal", ConfigDir: personalDir, Limits: contracts.ProfileLimits{DailyTokenBudget: 100}},
+	}
+	for _, p := range profiles {
+		if err := mgr.Add(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	store, err := storage.NewStore(ctx, filepath.Join(ccxHome, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range profiles {
+		if err := store.SaveProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.UpsertSessionTelemetry(ctx, "work", contracts.HookEvent{
+		Session:   "s1",
+		Event:     "SessionStart",
+		Timestamp: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runCLI(t, "suggest", "--json")
+	payload := decodeSuggestJSON(t, out)
+	if payload.Recommendation == nil || payload.Recommendation.Profile != "personal" {
+		t.Fatalf("recommendation = %+v, want personal after shared usage attribution", payload.Recommendation)
+	}
+	work := findSuggestCandidate(t, payload.Candidates, "work")
+	if work.Tokens24h == 0 {
+		t.Fatalf("work Tokens24h = 0, want shared usage attributed before evaluation")
 	}
 }
 

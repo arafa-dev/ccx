@@ -13,8 +13,10 @@ import (
 	"github.com/arafa-dev/ccx/internal/pricing"
 	"github.com/arafa-dev/ccx/internal/profile"
 	"github.com/arafa-dev/ccx/internal/quota"
+	"github.com/arafa-dev/ccx/internal/quotamigrate"
 	"github.com/arafa-dev/ccx/internal/recstream"
 	"github.com/arafa-dev/ccx/internal/scanner"
+	"github.com/arafa-dev/ccx/internal/sharedscan"
 	"github.com/arafa-dev/ccx/internal/storage"
 )
 
@@ -25,6 +27,10 @@ type runtimeDeps struct {
 	Profiles *profile.Manager
 	Scanner  contracts.Scanner
 	Pricing  contracts.PricingTable
+}
+
+type daemonSharedScanner interface {
+	ScanShared(context.Context, string, scanner.SessionLookup) (<-chan scanner.AttributedEvent, <-chan error)
 }
 
 func (d *runtimeDeps) Close() error {
@@ -71,6 +77,14 @@ func (a *storeCursorAdapter) Get(ctx context.Context, profileName, file string) 
 }
 
 func (a *storeCursorAdapter) Set(ctx context.Context, profileName, file string, c scanner.Cursor) error {
+	if profileName == scanner.SharedCursorProfile {
+		if err := a.store.SaveProfile(ctx, contracts.Profile{
+			Name:      scanner.SharedCursorProfile,
+			ConfigDir: filepath.Dir(filepath.Dir(file)),
+		}); err != nil {
+			return err
+		}
+	}
 	return a.store.SetCursor(ctx, profileName, file, c.Offset, c.Inode)
 }
 
@@ -80,7 +94,21 @@ func ingestAllProfiles(ctx context.Context, deps *runtimeDeps) ([]contracts.Prof
 		return nil, err
 	}
 	for i := range profiles {
-		if err := ingestProfile(ctx, deps, profiles[i]); err != nil {
+		p := profiles[i]
+		if err := deps.Store.SaveProfile(ctx, p); err != nil {
+			return nil, fmt.Errorf("saving profile %q before scan: %w", p.Name, err)
+		}
+	}
+
+	sharedRoot := quotamigrate.SharedProjectsPath(deps.Profiles.Root())
+	sharedProfiles, legacyProfiles := sharedscan.PartitionProfiles(sharedRoot, profiles)
+	if len(sharedProfiles) > 0 {
+		if err := ingestSharedProfiles(ctx, deps, sharedRoot, sharedProfiles); err != nil {
+			return nil, err
+		}
+	}
+	for i := range legacyProfiles {
+		if err := ingestProfile(ctx, deps, legacyProfiles[i]); err != nil {
 			return nil, err
 		}
 	}
@@ -131,6 +159,73 @@ func ingestProfile(ctx context.Context, deps *runtimeDeps, p contracts.Profile) 
 				if scanErr == nil {
 					scanErr = err
 				}
+			}
+		}
+	}
+	return scanErr
+}
+
+func ingestSharedProfiles(ctx context.Context, deps *runtimeDeps, sharedRoot string, profiles []contracts.Profile) error {
+	shared, ok := deps.Scanner.(daemonSharedScanner)
+	if !ok {
+		return fmt.Errorf("scanner does not support shared projects")
+	}
+	allowed := make(map[string]struct{}, len(profiles))
+	for i := range profiles {
+		allowed[profiles[i].Name] = struct{}{}
+	}
+
+	events, errs := shared.ScanShared(ctx, sharedRoot, deps.Store)
+	batches := make(map[string][]contracts.Event)
+	flush := func(profile string) error {
+		batch := batches[profile]
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := deps.Store.InsertEvents(ctx, profile, batch); err != nil {
+			return err
+		}
+		batches[profile] = batch[:0]
+		return nil
+	}
+	flushAll := func() error {
+		for profile := range batches {
+			if err := flush(profile); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	var scanErr error
+	for events != nil || errs != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev, ok := <-events:
+			if !ok {
+				events = nil
+				if err := flushAll(); err != nil {
+					return err
+				}
+				continue
+			}
+			if _, ok := allowed[ev.Profile]; !ok {
+				continue
+			}
+			batches[ev.Profile] = append(batches[ev.Profile], ev.Event)
+			if len(batches[ev.Profile]) >= 256 {
+				if err := flush(ev.Profile); err != nil {
+					return err
+				}
+			}
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			if err != nil && scanErr == nil {
+				scanErr = err
 			}
 		}
 	}
