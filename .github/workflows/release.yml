@@ -58,17 +58,30 @@ jobs:
             echo '<!doctype html><title>ccx</title>' > web/out/index.html
           fi
 
-      - name: Run goreleaser
+      - name: Set up GoReleaser
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          install-only: true
+
+      - name: Run goreleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          args=(release --clean)
+          if [ -z "$COSIGN_PRIVATE_KEY" ]; then
+            echo "::warning::COSIGN_PRIVATE_KEY is not configured; publishing unsigned checksums"
+            args+=(--skip=sign)
+          fi
+          if [ -z "$GH_PAT" ]; then
+            echo "::warning::GH_PAT is not configured; skipping Homebrew and Scoop tap updates"
+            args+=(--skip=homebrew --skip=scoop)
+          fi
+          goreleaser "${args[@]}"
 
       - name: Verify release exists
         env:
@@ -87,7 +100,13 @@ jobs:
           fi
 
       - name: Verify cosign signature
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
         run: |
+          if [ -z "$COSIGN_PRIVATE_KEY" ]; then
+            echo "::warning::COSIGN_PRIVATE_KEY is not configured; skip signature verification"
+            exit 0
+          fi
           tag="${GITHUB_REF#refs/tags/}"
           tmp="$(mktemp -d)"
           curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$tag/checksums.txt" -o "$tmp/checksums.txt"

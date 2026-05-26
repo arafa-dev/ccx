@@ -188,6 +188,7 @@ release:
     ### Install
 
     ```bash
+    {{- if .Env.GH_PAT }}
     # Homebrew (macOS / Linux)
     brew install arafa-dev/ccx/ccx
 
@@ -195,6 +196,7 @@ release:
     scoop bucket add ccx https://github.com/arafa-dev/scoop-ccx
     scoop install ccx
 
+    {{- end }}
     # Debian / Ubuntu
     curl -fsSLO https://github.com/arafa-dev/ccx/releases/download/{{ .Tag }}/ccx_{{ .Version }}_linux_amd64.deb
     sudo dpkg -i ccx_{{ .Version }}_linux_amd64.deb
@@ -210,8 +212,13 @@ release:
     go install github.com/arafa-dev/ccx/cmd/ccx@{{ .Tag }}
     ```
   footer: |
+    {{- if .Env.COSIGN_PRIVATE_KEY }}
     ---
     All binaries are signed with cosign. Verify with:
     ```
     cosign verify-blob --key https://github.com/arafa-dev/ccx/releases/download/{{ .Tag }}/cosign.pub --signature checksums.txt.sig checksums.txt
     ```
+    {{- else }}
+    ---
+    Checksums are published with this release. Configure `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` to publish cosign signatures.
+    {{- end }}
