@@ -1,5 +1,13 @@
 last_updated: 2026-01-15
 models:
+  # Opus 4.8 rates mirror Opus 4.7 (Opus tier has held $15/$75 per Mtok);
+  # adjust effective_from / rates if Anthropic publishes different figures.
+  - model: claude-opus-4-8
+    effective_from: 2026-01-15
+    input_per_mtok: 15.00
+    output_per_mtok: 75.00
+    cache_read_per_mtok: 1.50
+    cache_create_per_mtok: 18.75
   - model: claude-opus-4-7
     effective_from: 2026-01-15
     input_per_mtok: 15.00
