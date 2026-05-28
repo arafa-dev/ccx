@@ -8,9 +8,9 @@ import (
 func TestParseLineAssistantUsage(t *testing.T) {
 	line := []byte(`{"type":"assistant","uuid":"u-1","sessionId":"s-1","timestamp":"2026-05-19T12:00:01Z","message":{"model":"claude-opus-4-7","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":10,"cache_read_input_tokens":200}}}`)
 
-	ev, ok := parseLine(line, "my-project")
-	if !ok {
-		t.Fatalf("parseLine returned ok=false for valid assistant event")
+	ev, outcome := parseLine(line, "my-project")
+	if outcome != parseEvent {
+		t.Fatalf("parseLine returned outcome=%v for valid assistant event", outcome)
 	}
 	if ev.Type != "assistant" {
 		t.Errorf("Type = %q want %q", ev.Type, "assistant")
@@ -43,9 +43,9 @@ func TestParseLineAssistantUsage(t *testing.T) {
 func TestParseLineUserNoUsage(t *testing.T) {
 	line := []byte(`{"type":"user","uuid":"u-2","sessionId":"s-1","timestamp":"2026-05-19T12:00:00Z","message":{"content":[{"type":"text","text":"hi"}]}}`)
 
-	ev, ok := parseLine(line, "proj")
-	if !ok {
-		t.Fatalf("parseLine returned ok=false for valid user event")
+	ev, outcome := parseLine(line, "proj")
+	if outcome != parseEvent {
+		t.Fatalf("parseLine returned outcome=%v for valid user event", outcome)
 	}
 	if ev.Type != "user" {
 		t.Errorf("Type = %q want user", ev.Type)
@@ -58,40 +58,60 @@ func TestParseLineUserNoUsage(t *testing.T) {
 	}
 }
 
-func TestParseLineRejectsMalformed(t *testing.T) {
+func TestParseLineFlagsBrokenJSON(t *testing.T) {
 	cases := [][]byte{
-		[]byte(``),
-		[]byte(`   `),
 		[]byte(`not json at all`),
 		[]byte(`{`),
 		[]byte(`{"type":"assistant"`),
 		[]byte(`{"type":123}`),
 	}
 	for i, c := range cases {
-		if _, ok := parseLine(c, "p"); ok {
-			t.Errorf("case %d: parseLine returned ok=true for malformed input %q", i, c)
+		if _, outcome := parseLine(c, "p"); outcome != parseMalformed {
+			t.Errorf("case %d: broken JSON got outcome=%v, want parseMalformed for %q", i, outcome, c)
+		}
+	}
+}
+
+// TestParseLineIgnoresNonEventRecords pins the fix for the scanner-noise bug:
+// valid JSON records that Claude Code writes but that carry no usage event
+// (queue-operation, last-prompt, summary, blank lines) must be classified as
+// parseIgnore, never parseMalformed, so they are skipped without a WARN.
+func TestParseLineIgnoresNonEventRecords(t *testing.T) {
+	cases := [][]byte{
+		[]byte(``),
+		[]byte(`   `),
+		[]byte(`{"type":"queue-operation","operation":"enqueue","timestamp":"2026-04-22T15:57:07.677Z","sessionId":"s-1","content":"hi"}`),
+		[]byte(`{"type":"last-prompt","lastPrompt":"hi","sessionId":"s-1"}`),
+		[]byte(`{"type":"summary","summary":"x","leafUuid":"l-1"}`),
+	}
+	for i, c := range cases {
+		if _, outcome := parseLine(c, "p"); outcome == parseMalformed {
+			t.Errorf("case %d: non-event record wrongly flagged malformed: %q", i, c)
+		}
+		if _, outcome := parseLine(c, "p"); outcome == parseEvent {
+			t.Errorf("case %d: non-event record wrongly parsed as event: %q", i, c)
 		}
 	}
 }
 
 func TestParseLineRejectsMissingUUID(t *testing.T) {
 	line := []byte(`{"type":"assistant","sessionId":"s","timestamp":"2026-05-19T12:00:00Z"}`)
-	if _, ok := parseLine(line, "p"); ok {
-		t.Errorf("parseLine returned ok=true for event with no uuid")
+	if _, outcome := parseLine(line, "p"); outcome == parseEvent {
+		t.Errorf("parseLine returned parseEvent for event with no uuid")
 	}
 }
 
 func TestParseLineRejectsBadTimestamp(t *testing.T) {
 	line := []byte(`{"type":"user","uuid":"u","sessionId":"s","timestamp":"not-a-time"}`)
-	if _, ok := parseLine(line, "p"); ok {
-		t.Errorf("parseLine returned ok=true for event with bad timestamp")
+	if _, outcome := parseLine(line, "p"); outcome == parseEvent {
+		t.Errorf("parseLine returned parseEvent for event with bad timestamp")
 	}
 }
 
 func TestParseLineIgnoresUnknownFields(t *testing.T) {
 	line := []byte(`{"type":"user","uuid":"u","sessionId":"s","timestamp":"2026-05-19T12:00:00Z","cwd":"/x","gitBranch":"main","parentUuid":"p","extraFutureField":42}`)
-	if _, ok := parseLine(line, "p"); !ok {
-		t.Errorf("parseLine returned ok=false; unknown fields should be ignored")
+	if _, outcome := parseLine(line, "p"); outcome != parseEvent {
+		t.Errorf("parseLine returned outcome=%v; unknown fields should be ignored", outcome)
 	}
 }
 

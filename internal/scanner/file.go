@@ -86,17 +86,18 @@ func readFileWithEmit(ctx context.Context, path, project string, cursor Cursor, 
 		lineNum++
 		pos += int64(len(line))
 
-		ev, ok := parseLine(line, project)
-		if !ok {
-			slog.Warn("scanner: skipped malformed line", "file", base, "line", lineNum)
-			if err != nil {
-				return pos, inode, nil
+		ev, outcome := parseLine(line, project)
+		switch outcome {
+		case parseEvent:
+			if emitErr := emit(ev); emitErr != nil {
+				return pos, inode, emitErr
 			}
-			continue
-		}
-
-		if err := emit(ev); err != nil {
-			return pos, inode, err
+		case parseMalformed:
+			slog.Warn("scanner: skipped malformed line", "file", base, "line", lineNum)
+		case parseIgnore:
+			// Valid JSON, but not a usage event ccx tracks. Skip quietly;
+			// surfaced only under --verbose.
+			slog.Debug("scanner: skipped non-event line", "file", base, "line", lineNum)
 		}
 
 		if err != nil {
