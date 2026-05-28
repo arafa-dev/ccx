@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"sync"
 )
@@ -24,18 +23,7 @@ func (OSChildLauncher) Start(ctx context.Context, spec LaunchSpec) (StartedProce
 
 	cmd := exec.Command(spec.BinaryPath, spec.Args...) //nolint:gosec // Launching the selected claude binary is this package's purpose.
 	cmd.Env = spec.Env
-	cmd.Stdin = spec.Stdin
-	if cmd.Stdin == nil {
-		cmd.Stdin = os.Stdin
-	}
-	cmd.Stdout = spec.Stdout
-	if cmd.Stdout == nil {
-		cmd.Stdout = os.Stdout
-	}
-	cmd.Stderr = spec.Stderr
-	if cmd.Stderr == nil {
-		cmd.Stderr = os.Stderr
-	}
+	applyStdio(cmd, &spec)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting claude: %w", err)
 	}

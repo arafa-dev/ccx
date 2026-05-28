@@ -315,3 +315,48 @@ func TestEmbeddedMalformedYAMLReturnsError(t *testing.T) {
 		t.Fatalf("expected error on malformed embedded YAML, got nil")
 	}
 }
+
+func TestCostResolvesDatedModelAlias(t *testing.T) {
+	const yml = `
+last_updated: 2026-01-15
+models:
+  - model: claude-haiku-4-5
+    effective_from: 2026-01-15
+    input_per_mtok: 0.80
+    output_per_mtok: 4.00
+    cache_read_per_mtok: 0.08
+    cache_create_per_mtok: 1.00
+`
+	tbl, err := pricing.NewTableFromBytes([]byte(yml), nil)
+	if err != nil {
+		t.Fatalf("NewTableFromBytes: %v", err)
+	}
+	ts := time.Date(2026, 5, 21, 0, 0, 0, 0, time.UTC)
+	usage := contracts.Usage{OutputTokens: 1_000_000}
+
+	// Claude Code writes the dated model id; it must resolve to the base rate.
+	got, err := tbl.Cost("claude-haiku-4-5-20251001", ts, usage)
+	if err != nil {
+		t.Fatalf("Cost: %v", err)
+	}
+	if got != 4.00 {
+		t.Errorf("dated haiku alias = %.6f, want 4.00", got)
+	}
+}
+
+func TestCostSyntheticAndEmptyModelsAreZeroCost(t *testing.T) {
+	tbl, err := pricing.NewTableFromBytes([]byte(twoModelYAML), nil)
+	if err != nil {
+		t.Fatalf("NewTableFromBytes: %v", err)
+	}
+	ts := time.Date(2026, 5, 21, 0, 0, 0, 0, time.UTC)
+	for _, m := range []string{"", "<synthetic>"} {
+		got, err := tbl.Cost(m, ts, contracts.Usage{OutputTokens: 1_000_000})
+		if err != nil {
+			t.Fatalf("Cost(%q): %v", m, err)
+		}
+		if got != 0 {
+			t.Errorf("Cost(%q) = %.6f, want 0", m, got)
+		}
+	}
+}

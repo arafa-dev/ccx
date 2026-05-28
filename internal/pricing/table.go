@@ -3,7 +3,9 @@ package pricing
 import (
 	"fmt"
 	"log/slog"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -137,7 +139,7 @@ func buildTable(f fileShape) *Table {
 func (t *Table) Cost(model string, ts time.Time, usage contracts.Usage) (float64, error) {
 	rate, ok := t.lookup(model, ts)
 	if !ok {
-		if _, exists := t.rates[model]; !exists {
+		if !t.hasModel(model) && !isNonBillableModel(model) {
 			t.logUnknownOnce(model)
 		}
 		return 0, nil
@@ -152,7 +154,21 @@ func (t *Table) Cost(model string, ts time.Time, usage contracts.Usage) (float64
 }
 
 // lookup returns the Rate effective at ts for model, or (zero, false) if none.
+// The model name is matched exactly first, then against its date-stripped form
+// (e.g. "claude-haiku-4-5-20251001" → "claude-haiku-4-5") so dated model ids
+// emitted by Claude Code resolve to the undated pricing rows.
 func (t *Table) lookup(model string, ts time.Time) (Rate, bool) {
+	if rate, ok := t.lookupExact(model, ts); ok {
+		return rate, true
+	}
+	if normalized := stripModelDate(model); normalized != model {
+		return t.lookupExact(normalized, ts)
+	}
+	return Rate{}, false
+}
+
+// lookupExact resolves a single key against the rate table with no aliasing.
+func (t *Table) lookupExact(model string, ts time.Time) (Rate, bool) {
 	list, ok := t.rates[model]
 	if !ok || len(list) == 0 {
 		return Rate{}, false
@@ -163,6 +179,35 @@ func (t *Table) lookup(model string, ts time.Time) (Rate, bool) {
 		}
 	}
 	return Rate{}, false
+}
+
+// hasModel reports whether a pricing row exists for model under either its
+// exact name or its date-stripped alias.
+func (t *Table) hasModel(model string) bool {
+	if _, ok := t.rates[model]; ok {
+		return true
+	}
+	_, ok := t.rates[stripModelDate(model)]
+	return ok
+}
+
+// datedModelSuffix matches a trailing "-YYYYMMDD" release-date suffix.
+var datedModelSuffix = regexp.MustCompile(`-\d{8}$`)
+
+// stripModelDate removes a trailing "-YYYYMMDD" suffix from a model id. Names
+// without such a suffix are returned unchanged.
+func stripModelDate(model string) string {
+	return datedModelSuffix.ReplaceAllString(model, "")
+}
+
+// isNonBillableModel reports whether model is a sentinel that carries no real
+// pricing (Claude Code emits "" and "<synthetic>" for non-API turns). These
+// are expected and must not trigger an unknown-model warning.
+func isNonBillableModel(model string) bool {
+	if model == "" {
+		return true
+	}
+	return strings.HasPrefix(model, "<") && strings.HasSuffix(model, ">")
 }
 
 // logUnknownOnce emits exactly one slog warning per unknown model name.

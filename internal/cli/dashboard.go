@@ -39,6 +39,11 @@ func newDashboardCommand(opts *Options) *cobra.Command {
 				return err
 			}
 			if status.Running && status.URL != "" {
+				if c.Flags().Changed("port") {
+					_, _ = fmt.Fprintf(c.ErrOrStderr(),
+						"ccx: a daemon is already serving at %s; --port is ignored. Stop it (ccx daemon stop) to use a different port.\n",
+						status.URL)
+				}
 				openOrPrintDashboard(c, opts, status.URL, noOpen)
 				return nil
 			}

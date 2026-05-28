@@ -82,18 +82,7 @@ func Launch(ctx context.Context, spec LaunchSpec) (int, error) {
 
 	cmd := exec.Command(spec.BinaryPath, spec.Args...) //nolint:gosec // Launching the selected claude binary is this package's purpose.
 	cmd.Env = spec.Env
-	cmd.Stdin = spec.Stdin
-	if cmd.Stdin == nil {
-		cmd.Stdin = os.Stdin
-	}
-	cmd.Stdout = spec.Stdout
-	if cmd.Stdout == nil {
-		cmd.Stdout = os.Stdout
-	}
-	cmd.Stderr = spec.Stderr
-	if cmd.Stderr == nil {
-		cmd.Stderr = os.Stderr
-	}
+	applyStdio(cmd, &spec)
 
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("starting claude: %w", err)
@@ -116,6 +105,27 @@ func Launch(ctx context.Context, spec LaunchSpec) (int, error) {
 	}
 
 	return 0, fmt.Errorf("waiting for claude: %w", err)
+}
+
+// applyStdio wires the child's stdio to the spec's files, falling back to the
+// parent's os.Stdin/Stdout/Stderr. The spec fields are *os.File, so the nil
+// check must be on the pointer: assigning a nil *os.File into the io.Reader /
+// io.Writer fields of exec.Cmd yields a non-nil interface holding a typed-nil
+// pointer, which would defeat a `cmd.Stdin == nil` check and leave the child
+// connected to a pipe (no TTY) instead of the terminal.
+func applyStdio(cmd *exec.Cmd, spec *LaunchSpec) {
+	cmd.Stdin = os.Stdin
+	if spec.Stdin != nil {
+		cmd.Stdin = spec.Stdin
+	}
+	cmd.Stdout = os.Stdout
+	if spec.Stdout != nil {
+		cmd.Stdout = spec.Stdout
+	}
+	cmd.Stderr = os.Stderr
+	if spec.Stderr != nil {
+		cmd.Stderr = spec.Stderr
+	}
 }
 
 func isManagedEnv(entry, key string) bool {

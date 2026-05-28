@@ -147,9 +147,14 @@ profile's score or marks it unavailable, and `ccx run` can pick a healthier
 profile before launching Claude:
 
 ```bash
-ccx run -- claude -p "summarize this repo"
-ccx run --supervise -- claude
+ccx run                                # launch claude on the best profile
+ccx run -- -p "summarize this repo"    # args after -- are passed to claude
+ccx run --supervise                    # stay attached, swap on hard pressure
 ```
+
+`ccx run` locates the `claude` binary itself, so do **not** name it after `--`.
+Everything after `--` is forwarded to claude as arguments (`ccx run -- claude`
+would run `claude claude`). Override the binary with `--claude-binary` if needed.
 
 `ccx run --supervise` waits for a completed turn, then relaunches Claude with
 `--resume <session-id>` if the daemon reports a better profile. For continuity,
