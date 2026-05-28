@@ -119,7 +119,6 @@ func (s *Server) Serve(ctx context.Context, startPort, endPort int) (boundPort i
 }
 
 func (s *Server) routes() {
-	s.mux.Use(middleware.RealIP)
 	s.mux.Use(middleware.Recoverer)
 	s.mux.Use(securityHeaders)
 	s.mux.Get("/api/health", s.handleHealth)

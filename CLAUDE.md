@@ -30,7 +30,7 @@ Don't re-derive what's already documented. Don't summarize these docs back to th
 
 ## 2. Project at a glance
 
-- **What:** Go 1.22 CLI + optional background daemon + embedded Next.js 15 dashboard. Single binary. Cross-platform (macOS, Linux, Windows).
+- **What:** Go 1.24 CLI + optional background daemon + embedded Next.js 15 dashboard. Single binary. Cross-platform (macOS, Linux, Windows).
 - **Purpose:** Switch between Claude Code accounts (`CLAUDE_CONFIG_DIR`), surface per-profile usage, capture local session telemetry from Claude Code hooks, and emit advisory profile recommendations.
 - **Module path:** `github.com/arafa-dev/ccx`.
 - **Binary:** `cmd/ccx` → `dist/ccx` (via `make build`).

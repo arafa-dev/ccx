@@ -8,7 +8,7 @@ Operational guide for AI coding agents (Codex, Claude, Cursor, etc.) working on
 
 > **TL;DR for the impatient agent**
 >
-> - Stack: Go 1.22 CLI + optional background daemon + embedded Next.js 15 dashboard. Single binary.
+> - Stack: Go 1.24 CLI + optional background daemon + embedded Next.js 15 dashboard. Single binary.
 > - Touch only your assigned package. `internal/contracts/` and `internal/storage/schema.sql` are shared/frozen.
 > - Workflow per task: failing test → run-fail → implement → run-pass → one commit (conventional commits).
 > - Before pushing: `make ci` (= `golangci-lint run` + `go test -race -count=1 ./...`).

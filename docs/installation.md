@@ -62,7 +62,7 @@ ccx init pwsh | Out-String | Invoke-Expression
 
 ## From source
 
-Requires Go 1.22+:
+Requires Go 1.24+:
 
 ```bash
 go install github.com/arafa-dev/ccx/cmd/ccx@latest
