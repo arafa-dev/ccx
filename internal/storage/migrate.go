@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 var profileLimitColumns = []struct {
 	name string
@@ -73,6 +73,17 @@ CREATE TABLE IF NOT EXISTS profile_health (
 );
 `
 
+const migrationV3SQL = `
+INSERT INTO sessions (profile_name, session_id, last_seen_at, status)
+SELECT profile_name, session_id, MAX(ts), 'unknown'
+FROM events
+WHERE session_id != ''
+GROUP BY profile_name, session_id
+ON CONFLICT(profile_name, session_id) DO NOTHING;
+DELETE FROM events;
+DELETE FROM scan_cursors;
+`
+
 // Migrate applies versioned schema migrations. Version 1 remains the embedded
 // schema.sql contract; later versions are layered on top without dropping
 // existing tables or data.
@@ -114,6 +125,20 @@ func (s *Store) Migrate(ctx context.Context) (retErr error) {
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM schema_version; INSERT INTO schema_version (version) VALUES (2);`); err != nil {
 			return fmt.Errorf("recording schema v2: %w", err)
+		}
+	}
+
+	if version < 3 {
+		// v3 changes the events dedup identity from the per-line uuid to the
+		// Claude Code message.id. Existing rows were counted per line (~2x);
+		// preserve legacy session ownership for shared-history attribution,
+		// then clear events and cursors so the next scan rebuilds them
+		// correctly.
+		if _, err := tx.ExecContext(ctx, migrationV3SQL); err != nil {
+			return fmt.Errorf("applying schema v3: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM schema_version; INSERT INTO schema_version (version) VALUES (3);`); err != nil {
+			return fmt.Errorf("recording schema v3: %w", err)
 		}
 	}
 

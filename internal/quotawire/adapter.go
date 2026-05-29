@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/arafa-dev/ccx/internal/contracts"
+	"github.com/arafa-dev/ccx/internal/plandetect"
 	"github.com/arafa-dev/ccx/internal/profile"
 	"github.com/arafa-dev/ccx/internal/quota"
 	"github.com/arafa-dev/ccx/internal/storage"
@@ -38,6 +39,15 @@ func (a *Adapter) Quota(ctx context.Context, profileFilter string) ([]contracts.
 			}
 		}
 		profiles = filtered
+	}
+	// Prefer the plan tier detected from each profile's Claude config over any
+	// manually configured value; fall back to manual config when detection
+	// declines (missing/unknown). This keeps the displayed plan accurate
+	// without requiring `ccx profile --plan-tier`.
+	for i := range profiles {
+		if tier, ok := plandetect.Detect(profiles[i].ConfigDir); ok {
+			profiles[i].Limits.PlanTier = tier
+		}
 	}
 	computer := quota.Computer{Store: a.Store}
 	rows, failures, err := computer.All(ctx, profiles)

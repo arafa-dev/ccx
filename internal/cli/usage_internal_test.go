@@ -51,6 +51,21 @@ func TestRenderUsageTableSortsProfiles(t *testing.T) {
 	}
 }
 
+func TestBillableAndCacheSplit(t *testing.T) {
+	u := contracts.Usage{
+		InputTokens:       1_000_000,
+		OutputTokens:      4_000_000,
+		CacheReadTokens:   600_000_000,
+		CacheCreateTokens: 50_000_000,
+	}
+	if got := billableTokens(u); got != 5_000_000 {
+		t.Fatalf("billableTokens = %d, want 5_000_000", got)
+	}
+	if got := cacheTokens(u); got != 650_000_000 {
+		t.Fatalf("cacheTokens = %d, want 650_000_000", got)
+	}
+}
+
 type usagePricing struct {
 	cost float64
 	err  error

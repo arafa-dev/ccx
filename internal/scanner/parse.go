@@ -21,6 +21,7 @@ type rawLine struct {
 }
 
 type rawMsg struct {
+	ID    string    `json:"id,omitempty"`
 	Model string    `json:"model,omitempty"`
 	Usage *rawUsage `json:"usage,omitempty"`
 }
@@ -104,6 +105,13 @@ func parseLine(b []byte, project string) (contracts.Event, parseOutcome) {
 				OutputTokens:      r.Message.Usage.OutputTokens,
 				CacheReadTokens:   r.Message.Usage.CacheReadInputToks,
 				CacheCreateTokens: r.Message.Usage.CacheCreationInputToks,
+			}
+			// Claude Code writes one JSONL line per assistant content block,
+			// each with a unique line uuid but the same message.id and usage.
+			// Use message.id as the dedup identity so the response is counted
+			// once. Storage keeps the line with the largest output_tokens.
+			if r.Message.ID != "" {
+				ev.UUID = r.Message.ID
 			}
 		}
 	}

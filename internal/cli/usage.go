@@ -215,18 +215,19 @@ func renderUsageQuota(ctx context.Context, deps *Deps, out, errOut io.Writer, pr
 	usd30d := costByProfile(costRows)
 
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "PROFILE\tPLAN\t5H WINDOW\tWEEKLY WINDOW\tTOKENS 24H\tUSD 30D")
+	_, _ = fmt.Fprintln(tw, "PROFILE\tPLAN\t5H WINDOW\tWEEKLY WINDOW\tTOKENS 24H\tCACHE 24H\tUSD 30D")
 	for i := range profiles {
 		p := &profiles[i]
 		q := quotaByProfile[p.Name]
 		_, _ = fmt.Fprintf(
 			tw,
-			"%s\t%s\t%s\t%s\t%s\t$%.2f\n",
+			"%s\t%s\t%s\t%s\t%s\t%s\t$%.2f\n",
 			p.Name,
 			planTierLabel(q.PlanTier),
 			formatQuotaWindow(q.Window5h),
 			formatQuotaWindow(q.WindowWeekly),
-			humanCount(tokens24h[p.Name].TotalTokens()),
+			humanCount(billableTokens(tokens24h[p.Name])),
+			humanCount(cacheTokens(tokens24h[p.Name])),
 			usd30d[p.Name],
 		)
 	}
@@ -293,6 +294,14 @@ func humanTokens(u contracts.Usage) string {
 		humanCount(u.CacheReadTokens+u.CacheCreateTokens),
 	)
 }
+
+// billableTokens is the input+output total shown as the primary "tokens used"
+// figure; it excludes cache read/create which Anthropic bills at a fraction of
+// the input rate and which accumulate every turn.
+func billableTokens(u contracts.Usage) int { return u.InputTokens + u.OutputTokens }
+
+// cacheTokens is the combined cache read+create total, reported separately.
+func cacheTokens(u contracts.Usage) int { return u.CacheReadTokens + u.CacheCreateTokens }
 
 func humanCount(n int) string {
 	switch {
