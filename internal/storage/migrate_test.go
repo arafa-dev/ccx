@@ -151,6 +151,13 @@ func TestMigrateV3ResetsEventsForRescan(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
+	profile, ok, err := s.ProfileForSession(ctx, "s")
+	if err != nil {
+		t.Fatalf("profile for legacy session: %v", err)
+	}
+	if !ok || profile != "p" {
+		t.Fatalf("v3 must preserve legacy session ownership before clearing events; got %q,%v", profile, ok)
+	}
 	if n := s.CountEvents(ctx, t, "p"); n != 0 {
 		t.Fatalf("v3 must clear events for re-scan; got %d rows", n)
 	}

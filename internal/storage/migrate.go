@@ -74,6 +74,12 @@ CREATE TABLE IF NOT EXISTS profile_health (
 `
 
 const migrationV3SQL = `
+INSERT INTO sessions (profile_name, session_id, last_seen_at, status)
+SELECT profile_name, session_id, MAX(ts), 'unknown'
+FROM events
+WHERE session_id != ''
+GROUP BY profile_name, session_id
+ON CONFLICT(profile_name, session_id) DO NOTHING;
 DELETE FROM events;
 DELETE FROM scan_cursors;
 `
@@ -125,7 +131,9 @@ func (s *Store) Migrate(ctx context.Context) (retErr error) {
 	if version < 3 {
 		// v3 changes the events dedup identity from the per-line uuid to the
 		// Claude Code message.id. Existing rows were counted per line (~2x);
-		// clear events and cursors so the next scan rebuilds them correctly.
+		// preserve legacy session ownership for shared-history attribution,
+		// then clear events and cursors so the next scan rebuilds them
+		// correctly.
 		if _, err := tx.ExecContext(ctx, migrationV3SQL); err != nil {
 			return fmt.Errorf("applying schema v3: %w", err)
 		}
