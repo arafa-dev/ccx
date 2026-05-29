@@ -86,6 +86,45 @@ func TestInsertEventsDuplicateUUIDIgnored(t *testing.T) {
 	}
 }
 
+func TestInsertEventsDedupsByUUIDKeepingMaxOutput(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	mustSaveProfile(t, s, "p")
+
+	ts := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
+	mk := func(out int) contracts.Event {
+		return contracts.Event{
+			UUID:      "msg_123", // same identity (post-Task-1 parser behavior)
+			SessionID: "s1",
+			Timestamp: ts,
+			Type:      "assistant",
+			Project:   "proj",
+			Model:     "claude-opus-4-8",
+			Usage:     &contracts.Usage{InputTokens: 3, OutputTokens: out, CacheCreateTokens: 31695},
+		}
+	}
+	// Insert partial-output rows first, then the final complete one.
+	if err := s.InsertEvents(ctx, "p", []contracts.Event{mk(8), mk(8), mk(326)}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	rows, err := s.QueryUsage(ctx, contracts.UsageQuery{Profile: "p"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	var totalOut, totalIn int
+	for _, r := range rows {
+		totalOut += r.Usage.OutputTokens
+		totalIn += r.Usage.InputTokens
+	}
+	if totalOut != 326 {
+		t.Fatalf("want output 326 (one response, max output), got %d", totalOut)
+	}
+	if totalIn != 3 {
+		t.Fatalf("want input 3 (counted once), got %d", totalIn)
+	}
+}
+
 func TestInsertEventsRescanIsSafe(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
