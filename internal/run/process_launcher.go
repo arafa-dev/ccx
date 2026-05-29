@@ -13,7 +13,9 @@ type OSChildLauncher struct{}
 
 // Start launches spec.BinaryPath and returns a process handle the supervisor
 // can terminate between turns.
-func (OSChildLauncher) Start(ctx context.Context, spec LaunchSpec) (StartedProcess, error) { //nolint:gocritic // ChildLauncher interface uses value specs.
+//
+//nolint:gocritic // ChildLauncher interface uses value specs.
+func (OSChildLauncher) Start(ctx context.Context, spec LaunchSpec) (StartedProcess, error) {
 	if spec.BinaryPath == "" {
 		return nil, errors.New("launching claude: empty binary path")
 	}
@@ -21,7 +23,8 @@ func (OSChildLauncher) Start(ctx context.Context, spec LaunchSpec) (StartedProce
 		return nil, err
 	}
 
-	cmd := exec.Command(spec.BinaryPath, spec.Args...) //nolint:gosec // Launching the selected claude binary is this package's purpose.
+	//nolint:gosec // Launching the selected claude binary is this package's purpose.
+	cmd := exec.Command(spec.BinaryPath, spec.Args...)
 	cmd.Env = spec.Env
 	applyStdio(cmd, &spec)
 	if err := cmd.Start(); err != nil {
