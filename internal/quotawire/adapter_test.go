@@ -2,6 +2,7 @@ package quotawire
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -62,6 +63,35 @@ func TestAdapterQuotaProfileFilterReturnsOnlyMatchingProfile(t *testing.T) {
 	}
 	if rows[0].PlanTier != "pro" || rows[0].Window5h.Cap != 45 {
 		t.Fatalf("quota row = %+v, want pro defaults", rows[0])
+	}
+}
+
+func TestAdapterPrefersDetectedPlanTier(t *testing.T) {
+	ctx := context.Background()
+
+	// config dir reporting Pro
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".claude.json"),
+		[]byte(`{"oauthAccount":{"organizationType":"claude_pro"}}`), 0o600); err != nil {
+		t.Fatalf("write claude.json: %v", err)
+	}
+
+	adapter := newTestAdapter(t)
+	// Seed a profile with WRONG manual tier + the Pro config dir.
+	if err := adapter.Profiles.Add(ctx, contracts.Profile{
+		Name:      "work",
+		ConfigDir: dir,
+		Limits:    contracts.ProfileLimits{PlanTier: "max20"},
+	}); err != nil {
+		t.Fatalf("Add(work): %v", err)
+	}
+
+	rows, err := adapter.Quota(ctx, "work")
+	if err != nil {
+		t.Fatalf("quota: %v", err)
+	}
+	if len(rows) != 1 || rows[0].PlanTier != "pro" {
+		t.Fatalf("detected tier must win; got %+v", rows)
 	}
 }
 
