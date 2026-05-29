@@ -124,6 +124,17 @@ func (s *Store) CountEvents(ctx context.Context, t *testing.T, profileName strin
 	return n
 }
 
+// CountScanCursors returns the number of rows in scan_cursors. Test-only
+// helper.
+func (s *Store) CountScanCursors(ctx context.Context, t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scan_cursors`).Scan(&n); err != nil {
+		t.Fatalf("CountScanCursors: %v", err)
+	}
+	return n
+}
+
 // PragmaString reads a string-valued SQLite pragma. Test-only helper.
 func (s *Store) PragmaString(ctx context.Context, t *testing.T, name string) string {
 	t.Helper()

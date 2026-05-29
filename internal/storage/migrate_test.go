@@ -66,12 +66,12 @@ func TestMigrateSeedsSchemaVersion(t *testing.T) {
 	}
 
 	got := s.SchemaVersion(ctx, t)
-	if got != 2 {
-		t.Errorf("schema_version: got %d want 2", got)
+	if got != 3 {
+		t.Errorf("schema_version: got %d want 3", got)
 	}
 }
 
-func TestMigrateUpgradesV1DatabaseWithoutDroppingData(t *testing.T) {
+func TestMigrateUpgradesV1DatabaseAndResetsUsageData(t *testing.T) {
 	ctx := context.Background()
 	s, err := storage.NewStore(ctx, ":memory:")
 	if err != nil {
@@ -105,11 +105,11 @@ func TestMigrateUpgradesV1DatabaseWithoutDroppingData(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	if got := s.SchemaVersion(ctx, t); got != 2 {
-		t.Errorf("schema_version after upgrade: got %d want 2", got)
+	if got := s.SchemaVersion(ctx, t); got != 3 {
+		t.Errorf("schema_version after upgrade: got %d want 3", got)
 	}
-	if got := s.CountEvents(ctx, t, "work"); got != 1 {
-		t.Errorf("event count after upgrade: got %d want 1", got)
+	if got := s.CountEvents(ctx, t, "work"); got != 0 {
+		t.Errorf("event count after upgrade: got %d want 0", got)
 	}
 	p, err := s.GetProfile(ctx, "work")
 	if err != nil {
@@ -125,6 +125,40 @@ func TestMigrateUpgradesV1DatabaseWithoutDroppingData(t *testing.T) {
 	}
 }
 
+func TestMigrateV3ResetsEventsForRescan(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t) // runs Migrate to currentSchemaVersion
+	if err := s.SaveProfile(ctx, contracts.Profile{Name: "p", ConfigDir: "/tmp/p"}); err != nil {
+		t.Fatalf("seed profile: %v", err)
+	}
+	// Simulate legacy double-counted rows keyed by line uuid.
+	if err := s.InsertEvents(ctx, "p", []contracts.Event{
+		{
+			UUID: "line-a", SessionID: "s", Timestamp: time.Now().UTC(), Type: "assistant",
+			Usage: &contracts.Usage{OutputTokens: 8},
+		},
+		{
+			UUID: "line-b", SessionID: "s", Timestamp: time.Now().UTC(), Type: "assistant",
+			Usage: &contracts.Usage{OutputTokens: 8},
+		},
+	}); err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+
+	// Force the version backwards to 2 and re-run Migrate to exercise v3.
+	s.ExecSQL(ctx, t, `DELETE FROM schema_version; INSERT INTO schema_version (version) VALUES (2);`)
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	if n := s.CountEvents(ctx, t, "p"); n != 0 {
+		t.Fatalf("v3 must clear events for re-scan; got %d rows", n)
+	}
+	if cur := s.CountScanCursors(ctx, t); cur != 0 {
+		t.Fatalf("v3 must clear scan_cursors to force a full re-scan; got %d", cur)
+	}
+}
+
 func TestMigrateExistingV2DatabaseAddsProfileLimitColumns(t *testing.T) {
 	ctx := context.Background()
 	s, err := storage.NewStore(ctx, ":memory:")
@@ -137,12 +171,12 @@ func TestMigrateExistingV2DatabaseAddsProfileLimitColumns(t *testing.T) {
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	if got := s.SchemaVersion(ctx, t); got != 2 {
-		t.Fatalf("schema_version after first migrate: got %d want 2", got)
+	if got := s.SchemaVersion(ctx, t); got != 3 {
+		t.Fatalf("schema_version after first migrate: got %d want 3", got)
 	}
 
-	// Simulate a DB created by the initial v2 migration before profile limits
-	// were persisted. Migrate must be safe to run again and repair the schema.
+	// Simulate a DB created by an older migration before profile limits were
+	// persisted. Migrate must be safe to run again and repair the schema.
 	s.DropProfileLimitColumns(ctx, t)
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("repair Migrate: %v", err)
