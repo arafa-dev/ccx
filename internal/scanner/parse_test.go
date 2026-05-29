@@ -40,6 +40,35 @@ func TestParseLineAssistantUsage(t *testing.T) {
 	}
 }
 
+func TestParseLineUsesMessageIDAsUUID(t *testing.T) {
+	// Two JSONL lines from the SAME assistant response: same message.id,
+	// different line uuids, growing output_tokens. They must collapse to one
+	// identity (message.id) so downstream dedup counts the response once.
+	line1 := []byte(`{"type":"assistant","uuid":"line-aaa","sessionId":"s1","timestamp":"2026-05-29T10:00:00Z","message":{"id":"msg_123","model":"claude-opus-4-8","usage":{"input_tokens":3,"output_tokens":8,"cache_read_input_tokens":0,"cache_creation_input_tokens":31695}}}`)
+	line2 := []byte(`{"type":"assistant","uuid":"line-bbb","sessionId":"s1","timestamp":"2026-05-29T10:00:00Z","message":{"id":"msg_123","model":"claude-opus-4-8","usage":{"input_tokens":3,"output_tokens":326,"cache_read_input_tokens":0,"cache_creation_input_tokens":31695}}}`)
+
+	ev1, outcome1 := parseLine(line1, "proj")
+	ev2, outcome2 := parseLine(line2, "proj")
+	if outcome1 != parseEvent || outcome2 != parseEvent {
+		t.Fatalf("expected both lines to parse: outcome1=%v outcome2=%v", outcome1, outcome2)
+	}
+	if ev1.UUID != "msg_123" || ev2.UUID != "msg_123" {
+		t.Fatalf("usage lines must use message.id as UUID; got %q and %q", ev1.UUID, ev2.UUID)
+	}
+}
+
+func TestParseLineKeepsLineUUIDWhenNoUsage(t *testing.T) {
+	// A user line with no usage keeps its own line uuid as identity.
+	line := []byte(`{"type":"user","uuid":"line-ccc","sessionId":"s1","timestamp":"2026-05-29T10:00:00Z","message":{"id":"msg_999"}}`)
+	ev, outcome := parseLine(line, "proj")
+	if outcome != parseEvent {
+		t.Fatalf("expected line to parse")
+	}
+	if ev.UUID != "line-ccc" {
+		t.Fatalf("non-usage line must keep line uuid; got %q", ev.UUID)
+	}
+}
+
 func TestParseLineUserNoUsage(t *testing.T) {
 	line := []byte(`{"type":"user","uuid":"u-2","sessionId":"s-1","timestamp":"2026-05-19T12:00:00Z","message":{"content":[{"type":"text","text":"hi"}]}}`)
 
